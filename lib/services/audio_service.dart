@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:media_kit/media_kit.dart' hide Track;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/track.dart';
+import '../core/utils/logger.dart';
 
 final audioServiceProvider = Provider<AudioService>((ref) {
   final service = AudioService();
@@ -48,7 +49,17 @@ class AudioService {
         onPositionChanged?.call(position.inMilliseconds / 1000.0);
       });
 
-      return player.state.duration.inMilliseconds / 1000.0;
+      double dur = player.state.duration.inMilliseconds / 1000.0;
+      if (dur <= 0) {
+        dur = await player.stream.duration
+            .firstWhere((d) => d > Duration.zero,
+                orElse: () => Duration.zero)
+            .timeout(const Duration(seconds: 5),
+                onTimeout: () => Duration.zero)
+            .then((d) => d.inMilliseconds / 1000.0);
+      }
+      AppLogger.d('loadTrack 时长: ${dur.toStringAsFixed(2)}s (来自 ${dur > 0 ? "音轨文件" : "默认"})');
+      return dur;
     } catch (e) {
       player.dispose();
       _players.remove(track.id);

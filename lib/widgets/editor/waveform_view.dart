@@ -27,6 +27,7 @@ class WaveformView extends StatelessWidget {
           color: track.color,
           hasFile: track.audioFilePath != null,
           emptyColor: context.outline,
+          pixelsPerSecond: pixelsPerSecond,
         ),
       ),
     );
@@ -37,15 +38,25 @@ class _WaveformPainter extends CustomPainter {
   final Color color;
   final bool hasFile;
   final Color emptyColor;
+  final double pixelsPerSecond;
 
   _WaveformPainter({
     required this.color,
     required this.hasFile,
     required this.emptyColor,
+    this.pixelsPerSecond = 50,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final step = pixelsPerSecond > 200
+        ? 0.25
+        : pixelsPerSecond > 100
+            ? 0.5
+            : pixelsPerSecond > 50
+                ? 1.0
+                : 2.0;
+
     if (hasFile) {
       final paint = Paint()
         ..color = color.withAlpha(77)
@@ -59,11 +70,13 @@ class _WaveformPainter extends CustomPainter {
       final random = Random(42);
 
       path.moveTo(0, centerY);
-      for (double x = 0; x < size.width; x += 2) {
+      for (double x = 0; x < size.width; x += step) {
         final amplitude = _getAmplitude(x, size.width, random);
         path.lineTo(x, centerY - amplitude);
       }
-      for (double x = size.width - (size.width % 2); x >= 0; x -= 2) {
+      for (double x = size.width - (size.width % step.toInt().clamp(1, 2));
+          x >= 0;
+          x -= step) {
         final amplitude = _getAmplitude(x, size.width, random);
         path.lineTo(x, centerY + amplitude);
       }
@@ -72,11 +85,13 @@ class _WaveformPainter extends CustomPainter {
 
       final outlinePath = Path();
       outlinePath.moveTo(0, centerY);
-      for (double x = 0; x < size.width; x += 1) {
+      for (double x = 0; x < size.width; x += step) {
         final amplitude = _getAmplitude(x, size.width, random);
         outlinePath.lineTo(x, centerY - amplitude);
       }
-      for (double x = size.width - 1; x >= 0; x -= 1) {
+      for (double x = size.width - (size.width % step.toInt().clamp(1, 2));
+          x >= 0;
+          x -= step) {
         final amplitude = _getAmplitude(x, size.width, random);
         outlinePath.lineTo(x, centerY + amplitude);
       }
@@ -94,16 +109,15 @@ class _WaveformPainter extends CustomPainter {
         ..color = emptyColor.withAlpha(77)
         ..strokeWidth = 1;
 
-      final dashWidth = 4.0;
-      final dashSpace = 4.0;
-      double startX = 0;
-
       canvas.drawLine(
         Offset(0, centerY),
         Offset(size.width, centerY),
         paint..strokeWidth = 0.5,
       );
 
+      final dashWidth = 4.0;
+      final dashSpace = 4.0;
+      double startX = 0;
       while (startX < size.width) {
         canvas.drawLine(
           Offset(startX, centerY),
@@ -127,6 +141,7 @@ class _WaveformPainter extends CustomPainter {
   bool shouldRepaint(covariant _WaveformPainter oldDelegate) {
     return oldDelegate.hasFile != hasFile ||
         oldDelegate.color != color ||
-        oldDelegate.emptyColor != emptyColor;
+        oldDelegate.emptyColor != emptyColor ||
+        oldDelegate.pixelsPerSecond != pixelsPerSecond;
   }
 }

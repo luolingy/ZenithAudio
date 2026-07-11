@@ -116,18 +116,20 @@ class TrackTile extends ConsumerWidget {
                     Row(
                       children: [
                         _ControlButton(
-                          label: 'M',
                           isActive: track.isMuted,
                           activeColor: AppColors.mute,
+                          icon: track.isMuted
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
                           onTap: () => ref
                               .read(projectProvider.notifier)
                               .toggleTrackMute(track.id),
                         ),
                         const SizedBox(width: 4),
                         _ControlButton(
-                          label: 'S',
                           isActive: track.isSolo,
                           activeColor: AppColors.solo,
+                          icon: Icons.headphones_rounded,
                           onTap: () => ref
                               .read(projectProvider.notifier)
                               .toggleTrackSolo(track.id),
@@ -251,13 +253,13 @@ class TrackTile extends ConsumerWidget {
 }
 
 class _ControlButton extends StatelessWidget {
-  final String label;
+  final IconData icon;
   final bool isActive;
   final Color activeColor;
   final VoidCallback onTap;
 
   const _ControlButton({
-    required this.label,
+    required this.icon,
     required this.isActive,
     required this.activeColor,
     required this.onTap,
@@ -280,13 +282,10 @@ class _ControlButton extends StatelessWidget {
             width: isActive ? 1.5 : 1,
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isActive ? activeColor : context.outline,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
+        child: Icon(
+          icon,
+          size: 14,
+          color: isActive ? activeColor : context.outline,
         ),
       ),
     );

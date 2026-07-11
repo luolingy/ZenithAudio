@@ -122,12 +122,35 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
     }
   }
 
+  bool get _showBackButton {
+    if (!_waveformScrollCtrl.hasClients) return false;
+    final pps = ref.read(pixelsPerSecondProvider);
+    final pos = ref.read(playheadPositionProvider);
+    final screenX = pos * pps - _waveformScrollCtrl.offset;
+    final vpw = _waveformScrollCtrl.position.viewportDimension;
+    return screenX < -10 || screenX > vpw + 10;
+  }
+
+  void _scrollToPlayhead() {
+    if (!_waveformScrollCtrl.hasClients) return;
+    final pps = ref.read(pixelsPerSecondProvider);
+    final playhead = ref.read(playheadPositionProvider);
+    final target = playhead * pps - 50;
+    _waveformScrollCtrl.animateTo(
+      target.clamp(0, _waveformScrollCtrl.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+    setState(() => _userInteracted = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(projectProvider);
     final playhead = ref.watch(playheadPositionProvider);
     final pps = ref.watch(pixelsPerSecondProvider);
     final playbackState = ref.watch(playbackProvider);
+    final cs = Theme.of(context).colorScheme;
     final screenSize = getScreenSize(context);
     final totalWidth = (project.duration > 0 ? project.duration : 60) * pps;
 
@@ -194,20 +217,45 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                           ),
                                         ),
                                       ),
-                                if (project.tracks.isNotEmpty)
-                                  Positioned(
-                                    left: playhead * pps -
-                                        (_waveformScrollCtrl.hasClients
-                                            ? _waveformScrollCtrl.offset
-                                            : 0) -
-                                        1,
-                                    top: 0,
-                                    bottom: 0,
-                                    child: IgnorePointer(
-                                      child:
-                                          Container(width: 2, color: AppColors.playhead),
+                                  if (project.tracks.isNotEmpty)
+                                    Positioned(
+                                      left: playhead * pps -
+                                          (_waveformScrollCtrl.hasClients
+                                              ? _waveformScrollCtrl.offset
+                                              : 0) -
+                                          1,
+                                      top: 0,
+                                      bottom: 0,
+                                      child: IgnorePointer(
+                                        child: Container(
+                                            width: 2, color: AppColors.playhead),
+                                      ),
                                     ),
-                                  ),
+                                  if (_showBackButton)
+                                    Positioned(
+                                      right: 8,
+                                      top: 8,
+                                      child: Material(
+                                        color: cs.primary,
+                                        borderRadius:
+                                            BorderRadius.circular(20),
+                                        child: InkWell(
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          onTap: _scrollToPlayhead,
+                                          child: Container(
+                                            width: 32,
+                                            height: 32,
+                                            alignment: Alignment.center,
+                                            child: Icon(
+                                              Icons.play_arrow_rounded,
+                                              size: 18,
+                                              color: cs.onPrimary,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                               ],
                             ),
                           ),

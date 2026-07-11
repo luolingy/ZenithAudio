@@ -71,6 +71,7 @@ class ProjectNotifier extends Notifier<Project> {
         return t;
       }).toList(),
     );
+    ref.read(audioServiceProvider).updateTrackVolume(trackId, volume);
     AppLogger.d('音轨 "$trackName" 音量: ${(volume * 100).toInt()}%');
   }
 
@@ -83,6 +84,7 @@ class ProjectNotifier extends Notifier<Project> {
         return t;
       }).toList(),
     );
+    _syncVolumes();
     AppLogger.i('音轨 "${track.name}" ${newMuted ? "静音" : "取消静音"}');
   }
 
@@ -95,7 +97,19 @@ class ProjectNotifier extends Notifier<Project> {
         return t;
       }).toList(),
     );
+    _syncVolumes();
     AppLogger.i('音轨 "${track.name}" ${newSolo ? "独奏" : "取消独奏"}');
+  }
+
+  void _syncVolumes() {
+    final audio = ref.read(audioServiceProvider);
+    final hasSolo = state.hasSoloTrack;
+    for (final t in state.tracks) {
+      final effectiveVol = hasSolo
+          ? (t.isSolo ? t.volume : 0.0)
+          : (t.isMuted ? 0.0 : t.volume);
+      audio.updateTrackVolume(t.id, effectiveVol);
+    }
   }
 
   void setTrackAudioFile(String trackId, String filePath) {
