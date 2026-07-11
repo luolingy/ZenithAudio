@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'track.dart';
 
 class Project {
@@ -5,29 +6,28 @@ class Project {
   final String name;
   final List<Track> tracks;
   final double sampleRate;
-  final double duration;
 
   const Project({
     required this.id,
     required this.name,
     this.tracks = const [],
     this.sampleRate = 44100,
-    this.duration = 0,
   });
+
+  double get duration =>
+      tracks.fold<double>(0, (m, t) => max(t.duration, m));
 
   Project copyWith({
     String? id,
     String? name,
     List<Track>? tracks,
     double? sampleRate,
-    double? duration,
   }) {
     return Project(
       id: id ?? this.id,
       name: name ?? this.name,
       tracks: tracks ?? this.tracks,
       sampleRate: sampleRate ?? this.sampleRate,
-      duration: duration ?? this.duration,
     );
   }
 

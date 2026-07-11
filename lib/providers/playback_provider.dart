@@ -11,6 +11,8 @@ final playheadPositionProvider = StateProvider<double>((ref) => 0);
 
 final masterVolumeProvider = StateProvider<double>((ref) => 0.8);
 
+final pixelsPerSecondProvider = StateProvider<double>((ref) => 50.0);
+
 class PlaybackNotifier extends Notifier<PlaybackState> {
   @override
   PlaybackState build() {

@@ -15,6 +15,9 @@ class ProjectNotifier extends Notifier<Project> {
 
   @override
   Project build() {
+    ref.onDispose(() {
+      ref.read(audioServiceProvider).unloadAll();
+    });
     return Project(id: _uuid.v4(), name: '未命名项目');
   }
 
@@ -40,7 +43,13 @@ class ProjectNotifier extends Notifier<Project> {
 
     state = state.copyWith(tracks: [...state.tracks, track]);
     if (audioFilePath != null) {
-      ref.read(audioServiceProvider).loadTrack(track);
+      ref.read(audioServiceProvider).loadTrack(track).then((dur) {
+        final updated = track.copyWith(duration: dur);
+        state = state.copyWith(
+          tracks: state.tracks.map((t) => t.id == track.id ? updated : t).toList(),
+        );
+        AppLogger.d('音轨 "${track.name}" 时长: ${dur.toStringAsFixed(1)}s');
+      });
     }
     AppLogger.i('添加音轨: ${track.name}');
   }

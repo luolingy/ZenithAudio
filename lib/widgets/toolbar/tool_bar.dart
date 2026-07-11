@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/playback_provider.dart';
 import '../../services/file_service.dart';
 import '../../core/utils/logger.dart';
 
@@ -94,10 +95,20 @@ class AudioToolBar extends ConsumerWidget {
           _ToolButton(
             icon: Icons.zoom_in_outlined,
             tooltip: 'toolbar.zoomIn'.tr(),
+            onTap: () {
+              final cur = ref.read(pixelsPerSecondProvider);
+              ref.read(pixelsPerSecondProvider.notifier).state =
+                  (cur * 1.25).clamp(10, 500);
+            },
           ),
           _ToolButton(
             icon: Icons.zoom_out_outlined,
             tooltip: 'toolbar.zoomOut'.tr(),
+            onTap: () {
+              final cur = ref.read(pixelsPerSecondProvider);
+              ref.read(pixelsPerSecondProvider.notifier).state =
+                  (cur / 1.25).clamp(10, 500);
+            },
           ),
           _ToolButton(
             icon: Icons.fit_screen_outlined,

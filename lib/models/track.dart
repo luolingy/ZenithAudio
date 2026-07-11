@@ -9,6 +9,7 @@ class Track {
   final bool isSolo;
   final String? audioFilePath;
   final Color color;
+  final double duration;
 
   const Track({
     required this.id,
@@ -18,6 +19,7 @@ class Track {
     this.isSolo = false,
     this.audioFilePath,
     this.color = AppColors.waveform,
+    this.duration = 0,
   });
 
   Track copyWith({
@@ -28,6 +30,7 @@ class Track {
     bool? isSolo,
     String? audioFilePath,
     Color? color,
+    double? duration,
   }) {
     return Track(
       id: id ?? this.id,
@@ -37,6 +40,7 @@ class Track {
       isSolo: isSolo ?? this.isSolo,
       audioFilePath: audioFilePath ?? this.audioFilePath,
       color: color ?? this.color,
+      duration: duration ?? this.duration,
     );
   }
 

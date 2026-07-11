@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
@@ -13,20 +15,126 @@ import 'timeline_ruler.dart';
 import 'track_panel.dart';
 import 'waveform_view.dart';
 
-class AudioEditor extends ConsumerWidget {
+class AudioEditor extends ConsumerStatefulWidget {
   const AudioEditor({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AudioEditor> createState() => _AudioEditorState();
+}
+
+class _AudioEditorState extends ConsumerState<AudioEditor> {
+  final ScrollController _rulerScrollCtrl = ScrollController();
+  final ScrollController _waveformScrollCtrl = ScrollController();
+  bool _syncing = false;
+  bool _userInteracted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rulerScrollCtrl.addListener(_onRulerScroll);
+    _waveformScrollCtrl.addListener(_onWaveformScroll);
+  }
+
+  @override
+  void dispose() {
+    _rulerScrollCtrl.removeListener(_onRulerScroll);
+    _waveformScrollCtrl.removeListener(_onWaveformScroll);
+    _rulerScrollCtrl.dispose();
+    _waveformScrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onRulerScroll() {
+    if (_syncing) return;
+    _syncing = true;
+    if (_waveformScrollCtrl.hasClients) {
+      _waveformScrollCtrl.jumpTo(_rulerScrollCtrl.offset);
+    }
+    _syncing = false;
+  }
+
+  void _onWaveformScroll() {
+    if (_syncing) return;
+    _syncing = true;
+    if (_rulerScrollCtrl.hasClients) {
+      _rulerScrollCtrl.jumpTo(_waveformScrollCtrl.offset);
+    }
+    setState(() => _userInteracted = true);
+    _syncing = false;
+  }
+
+  void _autoScroll(double playheadSec) {
+    if (!_waveformScrollCtrl.hasClients) return;
+    final playing = ref.read(playbackProvider) == PlaybackState.playing;
+    if (!playing || _userInteracted) return;
+
+    final pps = ref.read(pixelsPerSecondProvider);
+    final offset = _waveformScrollCtrl.offset;
+    final viewportWidth = _waveformScrollCtrl.position.viewportDimension;
+    final playheadScreenX = playheadSec * pps - offset;
+
+    if (playheadScreenX > viewportWidth * 2 / 3) {
+      final target = playheadSec * pps - viewportWidth * 0.2;
+      final maxExtent = _waveformScrollCtrl.position.maxScrollExtent;
+      _waveformScrollCtrl.animateTo(
+        target.clamp(0, maxExtent),
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+
+    if (_userInteracted &&
+        playheadScreenX >= 0 &&
+        playheadScreenX <= viewportWidth) {
+      setState(() => _userInteracted = false);
+    }
+  }
+
+  void _zoom(double factor, double? focusX) {
+    final oldPps = ref.read(pixelsPerSecondProvider);
+    final newPps = (oldPps * factor).clamp(10.0, 500.0);
+    if (newPps == oldPps) return;
+    ref.read(pixelsPerSecondProvider.notifier).state = newPps;
+
+    if (_waveformScrollCtrl.hasClients && focusX != null) {
+      final offset = _waveformScrollCtrl.offset;
+      final ratio = newPps / oldPps;
+      final newOffset = (offset + focusX) * ratio - focusX;
+      _waveformScrollCtrl.jumpTo(newOffset);
+    }
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_waveformScrollCtrl.hasClients) return;
+    final isCtrl = HardwareKeyboard.instance.isControlPressed;
+    final delta = event.scrollDelta.dy;
+
+    if (isCtrl) {
+      final factor = delta < 0 ? 1.15 : 1 / 1.15;
+      final box = context.findRenderObject() as RenderBox?;
+      final localPos = box != null ? box.globalToLocal(event.position) : Offset.zero;
+      _zoom(factor, localPos.dx);
+    } else {
+      _waveformScrollCtrl.jumpTo(
+        (_waveformScrollCtrl.offset + delta * 3)
+            .clamp(0, _waveformScrollCtrl.position.maxScrollExtent),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final project = ref.watch(projectProvider);
     final playhead = ref.watch(playheadPositionProvider);
+    final pps = ref.watch(pixelsPerSecondProvider);
+    final playbackState = ref.watch(playbackProvider);
     final screenSize = getScreenSize(context);
+    final totalWidth = (project.duration > 0 ? project.duration : 60) * pps;
 
-    final pixelsPerSecond = switch (screenSize) {
-      ScreenSize.mobile => 30.0,
-      ScreenSize.tablet => 40.0,
-      ScreenSize.desktop => 50.0,
-    };
+    // Auto-scroll on playhead change
+    if (playbackState == PlaybackState.playing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _autoScroll(playhead));
+    }
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -35,59 +143,80 @@ class AudioEditor extends ConsumerWidget {
           if (screenSize != ScreenSize.mobile) const AudioMenuBar(),
           const AudioToolBar(),
           Expanded(
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    if (screenSize != ScreenSize.mobile)
-                      const SizedBox(width: AppConstants.trackPanelWidth),
-                    Expanded(
-                      child: ClipRect(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: TimelineRuler(
-                            duration: project.duration > 0 ? project.duration : 60,
-                            pixelsPerSecond: pixelsPerSecond,
-                            currentPosition: playhead,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: Row(
+            child: Listener(
+              onPointerSignal: _onPointerSignal,
+              child: Column(
+                children: [
+                  Row(
                     children: [
-                      const TrackPanel(),
+                      if (screenSize != ScreenSize.mobile)
+                        const SizedBox(width: AppConstants.trackPanelWidth),
                       Expanded(
                         child: ClipRect(
-                          child: project.tracks.isEmpty
-                              ? _buildEmptyState(context)
-                              : SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: SizedBox(
-                                    width: (project.duration > 0
-                                            ? project.duration
-                                            : 60) *
-                                        pixelsPerSecond,
-                                    child: ListView.builder(
-                                      itemCount: project.tracks.length,
-                                      itemExtent: AppConstants.trackTileHeight,
-                                      itemBuilder: (context, index) {
-                                        return WaveformView(
-                                          track: project.tracks[index],
-                                          pixelsPerSecond: pixelsPerSecond,
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ),
+                          child: SingleChildScrollView(
+                            controller: _rulerScrollCtrl,
+                            scrollDirection: Axis.horizontal,
+                            child: TimelineRuler(
+                              duration: project.duration > 0 ? project.duration : 60,
+                              pixelsPerSecond: pps,
+                              currentPosition: playhead,
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const TrackPanel(),
+                        Expanded(
+                          child: ClipRect(
+                            child: Stack(
+                              children: [
+                                project.tracks.isEmpty
+                                    ? _buildEmptyState(context)
+                                    : SingleChildScrollView(
+                                        controller: _waveformScrollCtrl,
+                                        scrollDirection: Axis.horizontal,
+                                        physics: const ClampingScrollPhysics(),
+                                        child: SizedBox(
+                                          width: totalWidth,
+                                          child: ListView.builder(
+                                            itemCount: project.tracks.length,
+                                            itemExtent: AppConstants.trackTileHeight,
+                                            itemBuilder: (context, index) {
+                                              return WaveformView(
+                                                track: project.tracks[index],
+                                                pixelsPerSecond: pps,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                if (project.tracks.isNotEmpty)
+                                  Positioned(
+                                    left: playhead * pps -
+                                        (_waveformScrollCtrl.hasClients
+                                            ? _waveformScrollCtrl.offset
+                                            : 0) -
+                                        1,
+                                    top: 0,
+                                    bottom: 0,
+                                    child: IgnorePointer(
+                                      child:
+                                          Container(width: 2, color: AppColors.playhead),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const TransportBar(),

@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/track.dart';
 
 final audioServiceProvider = Provider<AudioService>((ref) {
-  return AudioService();
+  final service = AudioService();
+  ref.onDispose(() => service.dispose());
+  return service;
 });
 
 class AudioService {
@@ -25,8 +27,8 @@ class AudioService {
     }
   }
 
-  Future<void> loadTrack(Track track) async {
-    if (track.audioFilePath == null) return;
+  Future<double> loadTrack(Track track) async {
+    if (track.audioFilePath == null) return 0;
 
     final player = Player();
     try {
@@ -45,9 +47,12 @@ class AudioService {
       player.stream.position.listen((position) {
         onPositionChanged?.call(position.inMilliseconds / 1000.0);
       });
+
+      return player.state.duration.inMilliseconds / 1000.0;
     } catch (e) {
       player.dispose();
       _players.remove(track.id);
+      return 0;
     }
   }
 

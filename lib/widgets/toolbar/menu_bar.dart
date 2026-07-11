@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/playback_provider.dart';
 import '../../services/file_service.dart';
 import '../../screens/settings_page.dart';
 import '../../screens/about_dialog.dart' as app;
@@ -107,8 +108,22 @@ class AudioMenuBar extends ConsumerWidget {
           _MenuButton(
             label: 'menu.view'.tr(),
             items: [
-              MenuItem(label: 'menu.view.zoomIn'.tr()),
-              MenuItem(label: 'menu.view.zoomOut'.tr()),
+              MenuItem(
+                label: 'menu.view.zoomIn'.tr(),
+                onTap: () {
+                  final cur = ref.read(pixelsPerSecondProvider);
+                  ref.read(pixelsPerSecondProvider.notifier).state =
+                      (cur * 1.25).clamp(10, 500);
+                },
+              ),
+              MenuItem(
+                label: 'menu.view.zoomOut'.tr(),
+                onTap: () {
+                  final cur = ref.read(pixelsPerSecondProvider);
+                  ref.read(pixelsPerSecondProvider.notifier).state =
+                      (cur / 1.25).clamp(10, 500);
+                },
+              ),
               MenuItem(label: 'menu.view.fitWindow'.tr()),
             ],
           ),
