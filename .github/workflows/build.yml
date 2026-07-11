@@ -1,6 +1,8 @@
 name: Build Zenith Audio
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       build_windows:
