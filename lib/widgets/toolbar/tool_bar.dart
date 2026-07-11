@@ -128,7 +128,7 @@ class _ToolButton extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(4),
-            hoverColor: context.surfaceLight,
+            hoverColor: context.surfaceHigh,
             child: Container(
               width: 32,
               height: 32,

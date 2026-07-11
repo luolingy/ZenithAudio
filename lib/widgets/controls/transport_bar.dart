@@ -69,10 +69,10 @@ class TransportBar extends ConsumerWidget {
               borderRadius: BorderRadius.circular(4),
               border: Border.all(color: Theme.of(context).dividerColor),
             ),
-            child: const Text(
+            child: Text(
               '00:00.0 / 00:00.0',
               style: TextStyle(
-                color: AppColors.accent,
+                color: cs.primary,
                 fontSize: 13,
                 fontFamily: 'monospace',
                 fontWeight: FontWeight.w500,
@@ -80,7 +80,7 @@ class TransportBar extends ConsumerWidget {
             ),
           ),
           const Spacer(),
-          Icon(Icons.volume_up_outlined, size: 16, color: context.textDim),
+          Icon(Icons.volume_up_outlined, size: 16, color: context.outline),
           const SizedBox(width: 6),
           SizedBox(
             width: 100,
@@ -124,14 +124,14 @@ class _TransportButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: isPrimary ? AppColors.accent : Colors.transparent,
+        color: isPrimary ? cs.primary : Colors.transparent,
         borderRadius: BorderRadius.circular(isPrimary ? 16 : 4),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(isPrimary ? 16 : 4),
           hoverColor: isPrimary
-              ? AppColors.accent.withAlpha(204)
-              : context.surfaceLight,
+              ? cs.primary.withAlpha(204)
+              : context.surfaceHigh,
           child: Container(
             width: size, height: size,
             alignment: Alignment.center,

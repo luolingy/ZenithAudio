@@ -240,7 +240,7 @@ class _GeneralContent extends StatelessWidget {
       children: [
         // Theme
         Text('settings.theme'.tr(), style: TextStyle(
-          color: context.textDim, fontSize: 10,
+          color: context.outline, fontSize: 10,
           fontWeight: FontWeight.w600, letterSpacing: 1,
         )),
         const SizedBox(height: 8),
@@ -267,7 +267,7 @@ class _GeneralContent extends StatelessWidget {
         const SizedBox(height: 24),
         // Language
         Text('settings.language'.tr(), style: TextStyle(
-          color: context.textDim, fontSize: 10,
+          color: context.outline, fontSize: 10,
           fontWeight: FontWeight.w600, letterSpacing: 1,
         )),
         const SizedBox(height: 8),
@@ -303,24 +303,28 @@ class _GeneralContent extends StatelessWidget {
 class _AboutContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
         _InfoCard(
           icon: Icons.waves,
           title: 'settings.appInfo'.tr(),
+          cs: cs,
           child: _AppInfoContent(),
         ),
         const SizedBox(height: 16),
         _InfoCard(
           icon: Icons.phone_android_outlined,
           title: 'settings.deviceInfo'.tr(),
+          cs: cs,
           child: _DeviceInfoContent(),
         ),
         const SizedBox(height: 16),
         _InfoCard(
           icon: Icons.link_outlined,
           title: 'settings.links'.tr(),
+          cs: cs,
           child: _LinksContent(),
         ),
       ],
@@ -332,8 +336,14 @@ class _InfoCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final Widget child;
+  final ColorScheme cs;
 
-  const _InfoCard({required this.icon, required this.title, required this.child});
+  const _InfoCard({
+    required this.icon,
+    required this.title,
+    required this.child,
+    required this.cs,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -351,10 +361,10 @@ class _InfoCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             child: Row(
               children: [
-                Icon(icon, size: 18, color: AppColors.accent),
+                Icon(icon, size: 18, color: cs.primary),
                 const SizedBox(width: 8),
                 Text(title, style: TextStyle(
-                  color: AppColors.accent,
+                  color: cs.primary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 )),
@@ -382,7 +392,7 @@ class _AppInfoContent extends StatelessWidget {
         Container(
           width: 48, height: 48,
           decoration: BoxDecoration(
-            color: AppColors.accent,
+            color: cs.primary,
             borderRadius: BorderRadius.circular(10),
           ),
           child: const Icon(Icons.waves, size: 28, color: Colors.white),
@@ -392,8 +402,8 @@ class _AppInfoContent extends StatelessWidget {
           fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface,
         )),
         const SizedBox(height: 2),
-        Text(AppConstants.appNameEn, style: const TextStyle(
-          fontSize: 10, color: AppColors.accent, fontWeight: FontWeight.w600, letterSpacing: 1.5,
+        Text(AppConstants.appNameEn, style: TextStyle(
+          fontSize: 10, color: cs.primary, fontWeight: FontWeight.w600, letterSpacing: 1.5,
         )),
         const SizedBox(height: 14),
         _InfoRow(label: 'about.version'.tr(), value: AppConfig.appVersion),
@@ -401,7 +411,7 @@ class _AppInfoContent extends StatelessWidget {
         _InfoRow(label: 'about.build'.tr(), value: AppConfig.appBuildNumber),
         const SizedBox(height: 12),
         Text(AppConfig.appCopyright,
-          style: TextStyle(fontSize: 11, color: context.textDim),
+          style: TextStyle(fontSize: 11, color: context.outline),
           textAlign: TextAlign.center,
         ),
       ],
@@ -465,8 +475,8 @@ class _LinkRow extends StatelessWidget {
         children: [
           Text(label, style: TextStyle(fontSize: 13, color: cs.onSurface)),
           const Spacer(),
-          Text(url, style: TextStyle(fontSize: 11, color: context.textDim)),
-          Icon(Icons.open_in_new, size: 14, color: context.textDim),
+          Text(url, style: TextStyle(fontSize: 11, color: context.outline)),
+          Icon(Icons.open_in_new, size: 14, color: context.outline),
         ],
       ),
     );
@@ -486,7 +496,7 @@ class _InfoRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text('$label: ', style: TextStyle(fontSize: 12, color: context.textDim)),
+        Text('$label: ', style: TextStyle(fontSize: 12, color: context.outline)),
         Text(value, style: TextStyle(fontSize: 12, color: cs.onSurface, fontWeight: FontWeight.w500)),
       ],
     );

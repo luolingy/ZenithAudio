@@ -9,6 +9,7 @@ class AboutDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
@@ -20,7 +21,7 @@ class AboutDialog extends StatelessWidget {
             Container(
               width: 56, height: 56,
               decoration: BoxDecoration(
-                color: AppColors.accent,
+                color: cs.primary,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Icon(Icons.waves, size: 32, color: Colors.white),
@@ -33,8 +34,8 @@ class AboutDialog extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(AppConstants.appNameEn,
-              style: const TextStyle(
-                color: AppColors.accent, fontSize: 11,
+              style: TextStyle(
+                color: cs.primary, fontSize: 11,
                 fontWeight: FontWeight.w600, letterSpacing: 2,
               ),
             ),
@@ -45,7 +46,7 @@ class AboutDialog extends StatelessWidget {
             const SizedBox(height: 20),
             Text(AppConfig.appCopyright,
               textAlign: TextAlign.center,
-              style: TextStyle(color: context.textDim, fontSize: 11),
+              style: TextStyle(color: context.outline, fontSize: 11),
             ),
             const SizedBox(height: 20),
             SizedBox(
@@ -53,7 +54,7 @@ class AboutDialog extends StatelessWidget {
               child: TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 style: TextButton.styleFrom(
-                  backgroundColor: AppColors.accent,
+                  backgroundColor: cs.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(6),
@@ -78,12 +79,13 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text('$label: ', style: TextStyle(color: context.textDim, fontSize: 12)),
+        Text('$label: ', style: TextStyle(color: context.outline, fontSize: 12)),
         Text(value,
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 12, fontWeight: FontWeight.w500),
+          style: TextStyle(color: cs.onSurface, fontSize: 12, fontWeight: FontWeight.w500),
         ),
       ],
     );

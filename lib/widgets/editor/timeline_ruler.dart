@@ -37,7 +37,7 @@ class TimelineRuler extends StatelessWidget {
                   duration,
                   pixelsPerSecond,
                   Theme.of(context).dividerColor,
-                  context.textDim,
+                  context.outline,
                 ),
               ),
             ),

@@ -36,7 +36,7 @@ class TrackPanel extends ConsumerWidget {
             height: AppConstants.timelineHeight,
             padding: const EdgeInsets.symmetric(horizontal: 8),
             decoration: BoxDecoration(
-              color: context.surfaceLight,
+              color: context.surfaceHigh,
               border: Border(
                 bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
               ),
@@ -61,18 +61,18 @@ class TrackPanel extends ConsumerWidget {
                         Icon(
                           Icons.music_note_outlined,
                           size: 32,
-                          color: context.textDim.withAlpha(128),
+                          color: context.outline.withAlpha(128),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'track.empty'.tr(),
-                          style: TextStyle(color: context.textDim, fontSize: 12),
+                          style: TextStyle(color: context.outline, fontSize: 12),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'track.emptyHint'.tr(),
                           style: TextStyle(
-                            color: context.textDim.withAlpha(153),
+                            color: context.outline.withAlpha(153),
                             fontSize: 10,
                           ),
                         ),

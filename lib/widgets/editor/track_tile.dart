@@ -73,7 +73,7 @@ class TrackTile extends ConsumerWidget {
                   Row(
                     children: [
                       Icon(Icons.volume_up_outlined,
-                          size: 12, color: context.textDim),
+                          size: 12, color: context.outline),
                       const SizedBox(width: 4),
                       Expanded(
                         child: SizedBox(
@@ -98,7 +98,7 @@ class TrackTile extends ConsumerWidget {
                       ),
                       Text(
                         '${(track.volume * 100).toInt()}%',
-                        style: TextStyle(color: context.textDim, fontSize: 9),
+                        style: TextStyle(color: context.outline, fontSize: 9),
                       ),
                     ],
                   ),
@@ -163,7 +163,7 @@ class _ControlButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: isActive
               ? activeColor.withAlpha(51)
-              : context.surfaceLight,
+              : context.surfaceHigh,
           borderRadius: BorderRadius.circular(3),
           border: Border.all(
             color: isActive ? activeColor : Theme.of(context).dividerColor,
@@ -173,7 +173,7 @@ class _ControlButton extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: isActive ? activeColor : context.textDim,
+            color: isActive ? activeColor : context.outline,
             fontSize: 11,
             fontWeight: FontWeight.w700,
           ),

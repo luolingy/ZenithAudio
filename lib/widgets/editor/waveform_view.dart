@@ -26,7 +26,7 @@ class WaveformView extends StatelessWidget {
         painter: _WaveformPainter(
           color: track.color,
           hasFile: track.audioFilePath != null,
-          emptyColor: context.textDim,
+          emptyColor: context.outline,
         ),
       ),
     );

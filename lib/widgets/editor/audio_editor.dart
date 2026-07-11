@@ -102,13 +102,13 @@ class AudioEditor extends ConsumerWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.waves_outlined, size: 64,
-              color: context.textDim.withAlpha(77)),
+              color: context.outline.withAlpha(77)),
           const SizedBox(height: 16),
           Text('editor.emptyTitle'.tr(),
-              style: TextStyle(color: context.textDim.withAlpha(153), fontSize: 14)),
+              style: TextStyle(color: context.outline.withAlpha(153), fontSize: 14)),
           const SizedBox(height: 8),
           Text('editor.emptySubtitle'.tr(),
-              style: TextStyle(color: context.textDim.withAlpha(102), fontSize: 11)),
+              style: TextStyle(color: context.outline.withAlpha(102), fontSize: 11)),
         ],
       ),
     );

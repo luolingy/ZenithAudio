@@ -130,7 +130,7 @@ class AudioMenuBar extends ConsumerWidget {
             child: Text(
               AppConstants.appNameEn,
               style: TextStyle(
-                color: AppColors.accent,
+                color: cs.primary,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 2,
@@ -194,7 +194,7 @@ class _MenuButtonState extends State<_MenuButton> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: _isHovered ? context.surfaceLight : Colors.transparent,
+            color: _isHovered ? context.surfaceHigh : Colors.transparent,
           ),
           child: Text(
             widget.label,
@@ -233,7 +233,7 @@ class _MenuButtonState extends State<_MenuButton> {
                     const Spacer(),
                     Text(
                       item.shortcut!,
-                      style: TextStyle(fontSize: 10, color: context.textDim),
+                      style: TextStyle(fontSize: 10, color: context.outline),
                     ),
                   ],
                 ],
