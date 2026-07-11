@@ -6,6 +6,7 @@ import '../../core/utils/theme_colors.dart';
 import '../../services/audio_service.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/recording_provider.dart';
 import '../../core/utils/logger.dart';
 
 String _formatTime(double seconds) {
@@ -23,6 +24,9 @@ class TransportBar extends ConsumerWidget {
     final playhead = ref.watch(playheadPositionProvider);
     final project = ref.watch(projectProvider);
     final masterVol = ref.watch(masterVolumeProvider);
+    final recState = ref.watch(recordingProvider);
+    final recElapsed = ref.watch(recordingElapsedProvider);
+    final isRecording = recState == RecordingState.recording;
     final cs = Theme.of(context).colorScheme;
 
     return Container(
@@ -76,7 +80,53 @@ class TransportBar extends ConsumerWidget {
               AppLogger.i('跳到末尾');
             },
           ),
+          const SizedBox(width: 4),
+          _TransportButton(
+            icon: isRecording ? Icons.stop_rounded : Icons.fiber_manual_record_rounded,
+            tooltip: isRecording ? 'transport.stopRec'.tr() : 'transport.record'.tr(),
+            size: 28, iconSize: 18,
+            onTap: () async {
+              final notifier = ref.read(recordingProvider.notifier);
+              if (isRecording) {
+                final path = await notifier.stopRecording();
+                if (path != null) {
+                  ref.read(projectProvider.notifier).addTrack(
+                    name: '录音_${DateTime.now().millisecondsSinceEpoch}',
+                    audioFilePath: path,
+                  );
+                }
+              } else {
+                await notifier.startRecording();
+              }
+            },
+          ),
           const SizedBox(width: 16),
+          if (isRecording)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 10, height: 10,
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _formatTime(recElapsed),
+                    style: TextStyle(
+                      color: Colors.red.shade300,
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(

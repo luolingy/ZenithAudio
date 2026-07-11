@@ -53,6 +53,18 @@ class TimelineRuler extends StatelessWidget {
   }
 }
 
+String _formatRulerTime(double seconds, double pps) {
+  final m = (seconds ~/ 60).toString().padLeft(2, '0');
+  final s = seconds % 60;
+  if (pps > 400) {
+    return '$m:${s.toStringAsFixed(2).padLeft(5, '0')}';
+  } else if (pps > 200) {
+    return '$m:${s.toStringAsFixed(1).padLeft(4, '0')}';
+  } else {
+    return '$m:${s.toInt().toString().padLeft(2, '0')}';
+  }
+}
+
 class _RulerPainter extends CustomPainter {
   final double duration;
   final double pixelsPerSecond;
@@ -73,7 +85,13 @@ class _RulerPainter extends CustomPainter {
     double minorInterval;
     final pxPerSec = pixelsPerSecond;
 
-    if (pxPerSec > 200) {
+    if (pxPerSec > 800) {
+      majorInterval = 0.2;
+      minorInterval = 0.05;
+    } else if (pxPerSec > 400) {
+      majorInterval = 0.5;
+      minorInterval = 0.1;
+    } else if (pxPerSec > 200) {
       majorInterval = 1;
       minorInterval = 0.2;
     } else if (pxPerSec > 80) {
@@ -87,9 +105,12 @@ class _RulerPainter extends CustomPainter {
       minorInterval = 10;
     }
 
-    for (double t = 0; t <= duration; t += minorInterval) {
+    final majorStep = (majorInterval / minorInterval).round();
+    int tickIndex = 0;
+    for (double t = 0; t <= duration + minorInterval * 0.5; t += minorInterval) {
+      if (t > duration) break;
       final x = t * pixelsPerSecond;
-      final isMajor = t % majorInterval == 0;
+      final isMajor = tickIndex % majorStep == 0;
       final tickHeight = isMajor ? 12.0 : 6.0;
 
       paint.strokeWidth = isMajor ? 1.0 : 0.5;
@@ -98,15 +119,14 @@ class _RulerPainter extends CustomPainter {
       canvas.drawLine(Offset(x, size.height - tickHeight), Offset(x, size.height), paint);
 
       if (isMajor) {
-        final minutes = (t ~/ 60).toString().padLeft(2, '0');
-        final seconds = (t % 60).toStringAsFixed(0).padLeft(2, '0');
         textPainter.text = TextSpan(
-          text: '$minutes:$seconds',
+          text: _formatRulerTime(t, pxPerSec),
           style: TextStyle(color: textDimColor, fontSize: 9),
         );
         textPainter.layout();
         textPainter.paint(canvas, Offset(x + 3, 2));
       }
+      tickIndex++;
     }
   }
 
