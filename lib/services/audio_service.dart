@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:just_audio/just_audio.dart';
+import 'package:media_kit/media_kit.dart' hide Track;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/track.dart';
 
@@ -8,8 +8,7 @@ final audioServiceProvider = Provider<AudioService>((ref) {
 });
 
 class AudioService {
-  final Map<String, AudioPlayer> _players = {};
-  Timer? _positionTimer;
+  final Map<String, Player> _players = {};
   bool _isPlaying = false;
   double _masterVolume = 1.0;
 
@@ -22,26 +21,28 @@ class AudioService {
   set masterVolume(double v) {
     _masterVolume = v.clamp(0.0, 1.0);
     for (final player in _players.values) {
-      player.setVolume(_masterVolume);
+      player.setVolume((_masterVolume * 100).roundToDouble());
     }
   }
 
   Future<void> loadTrack(Track track) async {
     if (track.audioFilePath == null) return;
 
-    final player = AudioPlayer();
+    final player = Player();
     try {
-      await player.setFilePath(track.audioFilePath!);
-      player.setVolume(track.volume * _masterVolume);
+      final uri = Uri.file(track.audioFilePath!);
+      await player.open(Media(uri.toString()), play: false);
+
+      final vol = (track.volume * _masterVolume * 100).roundToDouble();
+      await player.setVolume(vol);
+
       _players[track.id] = player;
 
-      player.playerStateStream.listen((state) {
-        if (state.processingState == ProcessingState.completed) {
-          stop();
-        }
+      player.stream.completed.listen((completed) {
+        if (completed) stop();
       });
 
-      player.positionStream.listen((position) {
+      player.stream.position.listen((position) {
         onPositionChanged?.call(position.inMilliseconds / 1000.0);
       });
     } catch (e) {
@@ -53,14 +54,14 @@ class AudioService {
   void updateTrackVolume(String trackId, double volume) {
     final player = _players[trackId];
     if (player != null) {
-      player.setVolume(volume * _masterVolume);
+      player.setVolume((volume * _masterVolume * 100).roundToDouble());
     }
   }
 
   void updateMasterVolume(double volume) {
     _masterVolume = volume.clamp(0.0, 1.0);
     for (final player in _players.values) {
-      player.setVolume(_masterVolume);
+      player.setVolume((_masterVolume * 100).roundToDouble());
     }
   }
 
@@ -68,28 +69,28 @@ class AudioService {
     if (_players.isEmpty) return;
     _isPlaying = true;
     for (final player in _players.values) {
-      await player.play();
+      player.play();
     }
   }
 
   Future<void> pause() async {
     _isPlaying = false;
     for (final player in _players.values) {
-      await player.pause();
+      player.pause();
     }
   }
 
   Future<void> stop() async {
     _isPlaying = false;
     for (final player in _players.values) {
-      await player.stop();
+      player.stop();
     }
   }
 
   Future<void> seekTo(double seconds) async {
     final duration = Duration(milliseconds: (seconds * 1000).round());
     for (final player in _players.values) {
-      await player.seek(duration);
+      player.seek(duration);
     }
   }
 
@@ -107,7 +108,6 @@ class AudioService {
   }
 
   void dispose() {
-    _positionTimer?.cancel();
     unloadAll();
   }
 }

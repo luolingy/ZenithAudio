@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../models/project.dart';
 import '../models/track.dart';
 import '../core/utils/logger.dart';
+import '../services/audio_service.dart';
 
 final projectProvider = NotifierProvider<ProjectNotifier, Project>(
   ProjectNotifier.new,
@@ -38,10 +39,14 @@ class ProjectNotifier extends Notifier<Project> {
     );
 
     state = state.copyWith(tracks: [...state.tracks, track]);
+    if (audioFilePath != null) {
+      ref.read(audioServiceProvider).loadTrack(track);
+    }
     AppLogger.i('添加音轨: ${track.name}');
   }
 
   void removeTrack(String trackId) {
+    ref.read(audioServiceProvider).unloadTrack(trackId);
     final removedName = state.tracks.firstWhere((t) => t.id == trackId).name;
     state = state.copyWith(
       tracks: state.tracks.where((t) => t.id != trackId).toList(),
@@ -103,6 +108,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void newProject() {
+    ref.read(audioServiceProvider).unloadAll();
     state = Project(id: _uuid.v4(), name: '未命名项目');
     AppLogger.i('新建项目');
   }

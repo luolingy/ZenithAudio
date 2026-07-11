@@ -3,8 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
+import '../../services/audio_service.dart';
 import '../../providers/playback_provider.dart';
+import '../../providers/project_provider.dart';
 import '../../core/utils/logger.dart';
+
+String _formatTime(double seconds) {
+  final m = (seconds ~/ 60).toString().padLeft(2, '0');
+  final s = (seconds % 60).toStringAsFixed(1).padLeft(4, '0');
+  return '$m:$s';
+}
 
 class TransportBar extends ConsumerWidget {
   const TransportBar({super.key});
@@ -12,6 +20,9 @@ class TransportBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playbackState = ref.watch(playbackProvider);
+    final playhead = ref.watch(playheadPositionProvider);
+    final project = ref.watch(projectProvider);
+    final masterVol = ref.watch(masterVolumeProvider);
     final cs = Theme.of(context).colorScheme;
 
     return Container(
@@ -29,7 +40,7 @@ class TransportBar extends ConsumerWidget {
             icon: Icons.skip_previous_rounded,
             tooltip: 'transport.skipStart'.tr(),
             onTap: () {
-              ref.read(playheadPositionProvider.notifier).state = 0;
+              ref.read(playbackProvider.notifier).seekTo(0);
               AppLogger.i('跳到开头');
             },
           ),
@@ -44,7 +55,6 @@ class TransportBar extends ConsumerWidget {
             size: 32, iconSize: 24, isPrimary: true,
             onTap: () {
               ref.read(playbackProvider.notifier).toggle();
-              AppLogger.i(playbackState == PlaybackState.playing ? '暂停' : '播放');
             },
           ),
           const SizedBox(width: 4),
@@ -60,6 +70,11 @@ class TransportBar extends ConsumerWidget {
           _TransportButton(
             icon: Icons.skip_next_rounded,
             tooltip: 'transport.skipEnd'.tr(),
+            onTap: () {
+              final dur = project.duration > 0 ? project.duration : 60.0;
+              ref.read(playbackProvider.notifier).seekTo(dur);
+              AppLogger.i('跳到末尾');
+            },
           ),
           const SizedBox(width: 16),
           Container(
@@ -70,7 +85,7 @@ class TransportBar extends ConsumerWidget {
               border: Border.all(color: Theme.of(context).dividerColor),
             ),
             child: Text(
-              '00:00.0 / 00:00.0',
+              '${_formatTime(playhead)} / ${_formatTime(project.duration > 0 ? project.duration : 0)}',
               style: TextStyle(
                 color: cs.primary,
                 fontSize: 13,
@@ -91,7 +106,12 @@ class TransportBar extends ConsumerWidget {
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
               ),
               child: Slider(
-                value: 0.8, min: 0, max: 1, onChanged: null,
+                value: masterVol,
+                min: 0, max: 1,
+                onChanged: (v) {
+                  ref.read(masterVolumeProvider.notifier).state = v;
+                  ref.read(audioServiceProvider).masterVolume = v;
+                },
               ),
             ),
           ),
