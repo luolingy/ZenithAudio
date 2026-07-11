@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
 import '../core/utils/logger.dart';
+import '../services/platform_dir.dart';
 
 enum RecordingState { idle, recording, permissionDenied }
 
@@ -46,9 +46,9 @@ class RecordingNotifier extends Notifier<RecordingState> {
     if (!hasPerm) return null;
 
     _recorder = AudioRecorder();
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await PlatformDir.getDocumentsPath('ZenithAudio');
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    _outputPath = '${dir.path}/recording_$timestamp.wav';
+    _outputPath = '$dir/recording_$timestamp.wav';
 
     await _recorder!.start(
       RecordConfig(encoder: AudioEncoder.wav),
@@ -86,6 +86,6 @@ class RecordingNotifier extends Notifier<RecordingState> {
     state = RecordingState.idle;
 
     AppLogger.i('录音结束: $path');
-    return path;
+    return path ?? _outputPath;
   }
 }

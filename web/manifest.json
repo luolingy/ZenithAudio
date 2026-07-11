@@ -1,11 +1,11 @@
 {
-    "name": "zenith_audio",
-    "short_name": "zenith_audio",
+    "name": "卓声 - ZENITH AUDIO",
+    "short_name": "卓声",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1A1A1E",
+    "theme_color": "#00BFA5",
+    "description": "卓声 - 多轨音频编辑器 / ZENITH AUDIO - Multi-track Audio Editor",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

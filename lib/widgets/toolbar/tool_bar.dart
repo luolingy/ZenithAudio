@@ -38,15 +38,15 @@ class AudioToolBar extends ConsumerWidget {
             tooltip: 'toolbar.importAudio'.tr(),
             onTap: () async {
               final fileService = FileService();
-              final path = await fileService.pickAudioFile();
-              if (path != null && context.mounted) {
+              final result = await fileService.pickAudioFile();
+              if (result != null && context.mounted) {
                 final trackIndex = ref.read(projectProvider).tracks.length + 1;
                 final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
                 ref.read(projectProvider.notifier).addTrack(
                       name: name,
-                      audioFilePath: path,
+                      audioFilePath: result.audioSource,
                     );
-                AppLogger.i('导入音频: $path');
+                AppLogger.i('导入音频: ${result.name}');
               }
             },
           ),

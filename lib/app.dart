@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/settings_provider.dart';
 import 'screens/editor_screen.dart';
@@ -14,7 +13,7 @@ class ZenithAudioApp extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
 
     return MaterialApp(
-      title: '${AppConstants.appName} - ${AppConstants.appNameEn}',
+      title: 'app.nameFull'.tr(),
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
