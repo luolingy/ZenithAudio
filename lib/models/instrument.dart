@@ -45,17 +45,22 @@ Future<String?> showInstrumentPicker(BuildContext context, {String? current}) as
     context: context,
     builder: (ctx) => AlertDialog(
       title: const Text('Select Instrument'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final preset in InstrumentPreset.presets)
-            _InstrumentTile(
-              name: preset.name,
-              value: preset.type.name,
-              selected: current,
-              onTap: () => Navigator.of(ctx).pop(preset.type.name),
-            ),
-        ],
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final preset in InstrumentPreset.presets)
+                _InstrumentTile(
+                  name: preset.name,
+                  value: preset.type.name,
+                  selected: current,
+                  onTap: () => Navigator.of(ctx).pop(preset.type.name),
+                ),
+            ],
+          ),
+        ),
       ),
       actions: [
         TextButton(

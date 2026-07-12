@@ -193,6 +193,7 @@ class _ProjectSettingsButton extends ConsumerWidget {
 
   void _showSettingsDialog(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
+    final bpmCtrl = TextEditingController(text: ref.read(projectProvider).bpm.round().toString());
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -248,16 +249,39 @@ class _ProjectSettingsButton extends ConsumerWidget {
                     Row(
                       children: [
                         Text('BPM', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-                        const Spacer(),
-                        Text('${proj.bpm.round()}',
-                            style: TextStyle(fontSize: 12, color: cs.onSurface)),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 60,
+                          child: TextField(
+                            controller: bpmCtrl,
+                            keyboardType: TextInputType.number,
+                            style: const TextStyle(fontSize: 12),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              border: OutlineInputBorder(),
+                            ),
+                            onSubmitted: (v) {
+                              final val = double.tryParse(v);
+                              if (val != null) {
+                                ref.read(projectProvider.notifier).setBpm(val);
+                              }
+                            },
+                          ),
+                        ),
                       ],
                     ),
                     Slider(
                       value: proj.bpm,
                       min: 20,
                       max: 300,
-                      onChanged: (v) => ref.read(projectProvider.notifier).setBpm(v),
+                      onChanged: (v) {
+                        bpmCtrl.text = v.round().toString();
+                        bpmCtrl.selection = TextSelection.fromPosition(
+                          TextPosition(offset: bpmCtrl.text.length),
+                        );
+                        ref.read(projectProvider.notifier).setBpm(v);
+                      },
                     ),
                     const SizedBox(height: 8),
 

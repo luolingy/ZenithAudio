@@ -45,6 +45,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   bool _isResizing = false;
   double? _dragStartX;
   double? _dragStartY;
+  List<Note>? _dragOriginNotes; // snapshot of notes at drag start
 
   @override
   void dispose() {
@@ -178,30 +179,36 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
   Widget _buildKeyboard(BuildContext context, ColorScheme cs) {
     final divColor = Theme.of(context).dividerColor;
-    return ListView.builder(
+    return Scrollbar(
       controller: _vScrollCtrl,
-      itemCount: _noteCount,
-      itemExtent: _noteRowHeight,
-      itemBuilder: (context, index) {
-        final pitch = _maxNote - index;
-        final isC = pitch % 12 == 0;
-        final isBlack = [1, 3, 6, 8, 10].contains(pitch % 12);
-        return Container(
-          height: _noteRowHeight,
-          decoration: BoxDecoration(
-            color: isBlack ? Colors.black26 : Colors.transparent,
-            border: Border(
-              bottom: BorderSide(color: divColor.withAlpha(38), width: 0.5),
-            ),
+      child: SingleChildScrollView(
+        controller: _vScrollCtrl,
+        child: SizedBox(
+          height: _noteCount * _noteRowHeight,
+          child: Column(
+            children: List.generate(_noteCount, (i) {
+              final pitch = _maxNote - i;
+              final isC = pitch % 12 == 0;
+              final isBlack = [1, 3, 6, 8, 10].contains(pitch % 12);
+              return Container(
+                height: _noteRowHeight,
+                decoration: BoxDecoration(
+                  color: isBlack ? Colors.black26 : Colors.transparent,
+                  border: Border(
+                    bottom: BorderSide(color: divColor.withAlpha(38), width: 0.5),
+                  ),
+                ),
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.only(right: 4),
+                child: isC
+                    ? Text('C${(pitch ~/ 12) - 1}',
+                        style: TextStyle(fontSize: 8, color: cs.onSurfaceVariant))
+                    : null,
+              );
+            }),
           ),
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 4),
-          child: isC
-              ? Text('C${(pitch ~/ 12) - 1}',
-                  style: TextStyle(fontSize: 8, color: cs.onSurfaceVariant))
-              : null,
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -290,6 +297,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final idx = _noteIndexAt(localPos, track);
     if (idx == null) return;
 
+    // Snapshot original notes for absolute-delta computation
+    _dragOriginNotes = track.notes.map((n) => n.copyWith()).toList();
+
     if (_isSelectMode) {
       // Start moving selected notes
       if (!_selectedIndices.contains(idx)) {
@@ -319,55 +329,35 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   }
 
   void _onPanUpdate(DragUpdateDetails details, Track track, Project project) {
-    if (_dragNoteIndex == null) return;
-    final dx = details.localPosition.dx - (_dragStartX ?? details.localPosition.dx);
-    final dy = details.localPosition.dy - (_dragStartY ?? details.localPosition.dy);
+    if (_dragNoteIndex == null || _dragOriginNotes == null) return;
+    final curX = details.localPosition.dx;
+    final curY = details.localPosition.dy;
 
     if (_isResizing) {
-      final n = track.notes[_dragNoteIndex!];
-      final newDur = _snapTime(max(0.125, n.duration + _xToTime(dx) - _xToTime(0)));
+      final orig = _dragOriginNotes![_dragNoteIndex!];
+      final newDur = _snapTime(max(0.125, orig.duration + _xToTime(curX - (_dragStartX ?? curX))));
       final updated = List<Note>.from(track.notes);
-      updated[_dragNoteIndex!] = n.copyWith(duration: newDur);
+      updated[_dragNoteIndex!] = orig.copyWith(duration: newDur);
       ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
-      _dragStartX = details.localPosition.dx;
-    } else if (_isSelectMode) {
-      // Move all selected notes
-      final deltaTime = _snapTime(_xToTime(dx)) - _snapTime(0);
-      final deltaPitch = _yToPitch(dy) - _yToPitch(0);
-      if (deltaTime == 0 && deltaPitch == 0) return;
-
-      final notes = List<Note>.from(track.notes);
-      final toMove = _selectedIndices.toList();
-      for (final i in toMove) {
-        if (i >= 0 && i < notes.length) {
-          final n = notes[i];
-          notes[i] = n.copyWith(
-            startTime: max(0.0, _snapTime(n.startTime + deltaTime)),
-            pitch: (n.pitch + deltaPitch).clamp(_minNote, _maxNote),
-          );
-        }
-      }
-      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, notes);
-      _dragStartX = details.localPosition.dx;
-      _dragStartY = details.localPosition.dy;
     } else {
-      // Edit mode: move single note
-      final deltaTime = _snapTime(_xToTime(dx)) - _snapTime(0);
-      final deltaPitch = _yToPitch(dy) - _yToPitch(0);
+      // Absolute pitch / time delta from drag start → always rounded to integer pitch
+      final deltaTime = _snapTime(_xToTime(curX)) - _snapTime(_xToTime(_dragStartX ?? curX));
+      final deltaPitch = _yToPitch(curY) - _yToPitch(_dragStartY ?? curY);
+
       if (deltaTime == 0 && deltaPitch == 0) return;
 
+      final indices = _isSelectMode ? _selectedIndices.toList() : [_dragNoteIndex!];
       final notes = List<Note>.from(track.notes);
-      final i = _dragNoteIndex!;
-      if (i >= 0 && i < notes.length) {
-        final n = notes[i];
-        notes[i] = n.copyWith(
-          startTime: max(0.0, _snapTime(n.startTime + deltaTime)),
-          pitch: (n.pitch + deltaPitch).clamp(_minNote, _maxNote),
+      for (final i in indices) {
+        if (i < 0 || i >= notes.length) continue;
+        if (i >= _dragOriginNotes!.length) continue;
+        final orig = _dragOriginNotes![i];
+        notes[i] = orig.copyWith(
+          startTime: max(0.0, _snapTime(orig.startTime + deltaTime)),
+          pitch: (orig.pitch + deltaPitch).clamp(_minNote, _maxNote),
         );
       }
       ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, notes);
-      _dragStartX = details.localPosition.dx;
-      _dragStartY = details.localPosition.dy;
     }
   }
 
@@ -377,6 +367,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       _isResizing = false;
       _dragStartX = null;
       _dragStartY = null;
+      _dragOriginNotes = null;
     });
   }
 

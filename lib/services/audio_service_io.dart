@@ -15,16 +15,26 @@ class _TrackPlayer {
   StreamSubscription? completedSub;
   StreamSubscription? positionSub;
   StreamSubscription? durationSub;
+  bool _disposed = false;
 
   _TrackPlayer(this.player);
 
-  Future<void> dispose() async {
-    await completedSub?.cancel();
-    await positionSub?.cancel();
-    await durationSub?.cancel();
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+
+    // Cancel Dart subscriptions (fire-and-forget; isolate teardown is imminent)
+    completedSub?.cancel();
+    positionSub?.cancel();
+    durationSub?.cancel();
     completedSub = null;
     positionSub = null;
     durationSub = null;
+
+    // Stop playback and release native resources synchronously.
+    // This ensures media_kit's NativeReferenceHolder removes its entries
+    // BEFORE the Dart isolate is torn down by hot restart.
+    player.stop();
     player.dispose();
   }
 }
@@ -66,6 +76,7 @@ class AudioService {
       _players[track.id] = tp;
 
       tp.completedSub = player.stream.completed.listen((completed) {
+        if (tp._disposed) return;
         if (completed) {
           _isPlaying = false;
           onCompleted?.call();
@@ -73,6 +84,7 @@ class AudioService {
       });
 
       tp.positionSub = player.stream.position.listen((position) {
+        if (tp._disposed) return;
         final now = DateTime.now();
         if (now.difference(_lastPositionUpdate) < _positionThrottle) return;
         _lastPositionUpdate = now;
@@ -95,7 +107,7 @@ class AudioService {
       AppLogger.d('loadTrack: ${dur.toStringAsFixed(2)}s');
       return dur;
     } catch (e) {
-      await tp.dispose();
+      tp.dispose();
       _players.remove(track.id);
       return 0;
     }
@@ -150,14 +162,12 @@ class AudioService {
 
   Future<void> unloadTrack(String trackId) async {
     final tp = _players.remove(trackId);
-    if (tp != null) {
-      await tp.dispose();
-    }
+    tp?.dispose();
   }
 
   Future<void> unloadAll() async {
     for (final tp in _players.values) {
-      await tp.dispose();
+      tp.dispose();
     }
     _players.clear();
     _isPlaying = false;
