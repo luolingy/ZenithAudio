@@ -73,16 +73,29 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
 
     // Auto-stop on completion
     player.stream.completed.listen((_) {
-      if (mounted && _previewingId == id) {
-        setState(() => _previewingId = null);
-      }
-      player.dispose();
-      if (_previewPlayer == player) _previewPlayer = null;
-      // Clean up temp file
-      try { File(filePath).delete(); } catch (_) {}
+      _onPreviewEnd(id, player, filePath);
+    });
+    player.stream.error.listen((_) {
+      _onPreviewEnd(id, player, filePath);
     });
 
-    await player.open(Media('file://$filePath'), play: true);
+    try {
+      final uri = Uri.file(filePath).toString();
+      await player.open(Media(uri));
+      await player.setVolume(100);
+      player.play();
+    } catch (_) {
+      _onPreviewEnd(id, player, filePath);
+    }
+  }
+
+  void _onPreviewEnd(String id, Player player, String filePath) {
+    if (mounted && _previewingId == id) {
+      setState(() => _previewingId = null);
+    }
+    player.dispose();
+    if (_previewPlayer == player) _previewPlayer = null;
+    try { File(filePath).delete(); } catch (_) {}
   }
 
   Future<void> _playPreviewWeb(Uint8List wavBytes, String id) async {

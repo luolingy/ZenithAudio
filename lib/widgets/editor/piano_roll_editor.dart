@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
 import '../../models/note.dart';
@@ -7,7 +9,6 @@ import '../../models/project.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/settings_provider.dart';
 
-/// Full-screen piano roll editor for a single instrument track.
 class PianoRollEditor extends ConsumerStatefulWidget {
   final String trackId;
 
@@ -28,7 +29,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   double get _pps => (_basePps * _zoomLevel).clamp(20, 600);
   double get _noteRowHeight => (_baseRowH * _zoomLevel).clamp(4, 60);
 
-  // Scrolling — separate controllers for keyboard & grid to avoid "attached to multiple positions"
+  // Scrolling
   final ScrollController _hScrollCtrl = ScrollController();
   final ScrollController _keyVScrollCtrl = ScrollController();
   final ScrollController _gridVScrollCtrl = ScrollController();
@@ -41,19 +42,29 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   bool _isSelectMode = false;
   final Set<int> _selectedIndices = {};
 
+  // Drag state — use local list for performance, commit on drag end
   int? _dragNoteIndex;
   bool _isResizing = false;
   double? _dragStartX;
   double? _dragStartY;
   List<Note>? _dragOriginNotes;
+  List<Note>? _localDragNotes;
 
-  // ── Viewport pan state ──
+  // Viewport pan
   bool _isPanning = false;
   int _activePointers = 0;
   double? _panStartX;
   double? _panStartY;
   double? _panOffX;
   double? _panOffY;
+
+  // Pinch-to-zoom
+  final Map<int, Offset> _pointerPos = {};
+  double? _pinchStartDist;
+  double? _pinchStartZoom;
+
+  // Ctrl key for scroll-wheel zoom
+  bool _isCtrlDown = false;
 
   @override
   void initState() {
@@ -91,10 +102,8 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   }
 
   double _pitchToY(int pitch) => (_maxNote - pitch) * _noteRowHeight;
-
   int _yToPitch(double y) =>
       (_maxNote - (y / _noteRowHeight).round()).clamp(_minNote, _maxNote);
-
   double _timeToX(double t) => t * _pps;
   double _xToTime(double x) => x / _pps;
 
@@ -117,8 +126,21 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: _buildAppBar(context, cs, track, settings),
-      body: _buildBody(context, cs, track, project),
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _onKeyEvent,
+        child: _buildBody(context, cs, track, project),
+      ),
     );
+  }
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.controlLeft ||
+        event.logicalKey == LogicalKeyboardKey.controlRight) {
+      _isCtrlDown = event is KeyDownEvent;
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   PreferredSizeWidget _buildAppBar(
@@ -165,7 +187,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
               onTap: _cycleGridResolution,
             ),
           const SizedBox(width: 8),
-          // Zoom slider
           SizedBox(
             width: 80,
             child: SliderTheme(
@@ -251,6 +272,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final beatSec = project.secondsPerBeat;
     final totalTime = max(project.duration, 30.0);
     final totalWidth = totalTime * _pps;
+    final notes = _localDragNotes ?? track.notes;
 
     return Scrollbar(
       controller: _hScrollCtrl,
@@ -267,16 +289,17 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                 onPointerDown: _onPointerDown,
                 onPointerMove: _onPointerMove,
                 onPointerUp: _onPointerUp,
+                onPointerSignal: _onPointerSignal,
                 behavior: HitTestBehavior.translucent,
                 child: GestureDetector(
                   onTapUp: (details) => _onTapUp(details, track, project),
-                  onPanStart: (details) => _onPanStart(details, track, project),
-                  onPanUpdate: (details) => _onPanUpdate(details, track, project),
-                  onPanEnd: (details) => _onPanEnd(details, track, project),
+                  onPanStart: (details) => _onPanStart(details, track),
+                  onPanUpdate: (details) => _onPanUpdate(details),
+                  onPanEnd: (details) => _onPanEnd(track),
                   child: CustomPaint(
                     size: Size(totalWidth, _noteCount * _noteRowHeight),
                     painter: _PianoRollEditorPainter(
-                      notes: track.notes,
+                      notes: notes,
                       pps: _pps,
                       noteRowHeight: _noteRowHeight,
                       minNote: _minNote,
@@ -301,33 +324,52 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     );
   }
 
-  // ── Viewport pan (middle-mouse / two-finger touch) ──
+  // ── Viewport pan / pinch zoom / scroll-wheel zoom ──
 
   void _onPointerDown(PointerDownEvent event) {
     _activePointers++;
+    _pointerPos[event.pointer] = event.localPosition;
+
     if ((event.buttons & 4) != 0) {
-      // Secondary button → initiate pan
       _startPan(event.localPosition);
-    } else if (_activePointers >= 2) {
-      // Two-finger touch → cancel note drag & start pan
+    } else if (_activePointers == 2) {
       if (_dragNoteIndex != null) {
-        setState(() {
-          _dragNoteIndex = null;
-          _isResizing = false;
-          _dragStartX = null;
-          _dragStartY = null;
-          _dragOriginNotes = null;
-        });
+        _dragNoteIndex = null;
+        _isResizing = false;
+        _dragStartX = null;
+        _dragStartY = null;
+        _dragOriginNotes = null;
+        _localDragNotes = null;
       }
+      _startPan(event.localPosition);
+      // Start pinch tracking
+      final pts = _pointerPos.values.toList();
+      _pinchStartDist = (pts[1] - pts[0]).distance;
+      _pinchStartZoom = _zoomLevel;
+    } else if (_activePointers > 2) {
       _startPan(event.localPosition);
     }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
+    _pointerPos[event.pointer] = event.localPosition;
+
     if (_isPanning && _panStartX != null && _panStartY != null) {
+      // Two-finger pinch-zoom
+      if (_activePointers >= 2 &&
+          _pinchStartDist != null &&
+          _pinchStartDist! > 0 &&
+          _pinchStartZoom != null &&
+          _pointerPos.length >= 2) {
+        final pts = _pointerPos.values.toList();
+        final dist = (pts[0] - pts[1]).distance;
+        final newZoom = (_pinchStartZoom! * (dist / _pinchStartDist!)).clamp(0.5, 10.0);
+        setState(() => _zoomLevel = newZoom);
+      }
+
+      // Pan
       final dx = event.localPosition.dx - _panStartX!;
       final dy = event.localPosition.dy - _panStartY!;
-
       if (_hScrollCtrl.hasClients) {
         _hScrollCtrl.jumpTo((_panOffX! - dx).clamp(0, _hScrollCtrl.position.maxScrollExtent));
       }
@@ -339,8 +381,19 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
   void _onPointerUp(PointerUpEvent event) {
     _activePointers = max(0, _activePointers - 1);
+    _pointerPos.remove(event.pointer);
     if (_activePointers < 2) {
       _isPanning = false;
+      _pinchStartDist = null;
+      _pinchStartZoom = null;
+    }
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is PointerScrollEvent && _isCtrlDown) {
+      setState(() {
+        _zoomLevel = (_zoomLevel * (event.scrollDelta.dy < 0 ? 1.15 : 0.85)).clamp(0.5, 10.0);
+      });
     }
   }
 
@@ -352,15 +405,15 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     _panOffY = _gridVScrollCtrl.hasClients ? _gridVScrollCtrl.offset : 0;
   }
 
-  // ── Gesture handlers (note operations) ──
+  // ── Tap / Drag (note operations, local state for performance) ──
 
   void _onTapUp(TapUpDetails details, Track track, Project project) {
     if (_isPanning) return;
     final localPos = details.localPosition;
-    final idx = _noteIndexAt(localPos, track);
+    final idx = _noteIndexAt(localPos, track.notes);
 
     if (_isSelectMode) {
-      if (idx != null) {
+      if (idx >= 0) {
         setState(() {
           if (_selectedIndices.contains(idx)) {
             _selectedIndices.remove(idx);
@@ -372,7 +425,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         setState(() => _selectedIndices.clear());
       }
     } else {
-      if (idx != null) {
+      if (idx >= 0) {
         final updated = List<Note>.from(track.notes)..removeAt(idx);
         ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
       } else {
@@ -381,13 +434,14 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     }
   }
 
-  void _onPanStart(DragStartDetails details, Track track, Project project) {
+  void _onPanStart(DragStartDetails details, Track track) {
     if (_isPanning) return;
     final localPos = details.localPosition;
-    final idx = _noteIndexAt(localPos, track);
-    if (idx == null) return;
+    final idx = _noteIndexAt(localPos, track.notes);
+    if (idx < 0) return;
 
     _dragOriginNotes = track.notes.map((n) => n.copyWith()).toList();
+    _localDragNotes = List<Note>.from(track.notes);
 
     if (_isSelectMode) {
       if (!_selectedIndices.contains(idx)) {
@@ -400,8 +454,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     } else {
       final n = track.notes[idx];
       final noteRightX = _timeToX(n.startTime + n.duration);
-      final edgeThreshold = 8.0;
-      if ((localPos.dx - noteRightX).abs() < edgeThreshold) {
+      if ((localPos.dx - noteRightX).abs() < 8.0) {
         _dragNoteIndex = idx;
         _dragStartX = localPos.dx;
         _isResizing = true;
@@ -414,48 +467,47 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     }
   }
 
-  void _onPanUpdate(DragUpdateDetails details, Track track, Project project) {
-    if (_isPanning || _dragNoteIndex == null || _dragOriginNotes == null) return;
+  void _onPanUpdate(DragUpdateDetails details) {
+    if (_isPanning || _dragNoteIndex == null || _dragOriginNotes == null || _localDragNotes == null) return;
     final curX = details.localPosition.dx;
     final curY = details.localPosition.dy;
 
     if (_isResizing) {
       final orig = _dragOriginNotes![_dragNoteIndex!];
-      final rawDelta = (_xToTime(curX) - _xToTime(_dragStartX!));
+      final rawDelta = _xToTime(curX) - _xToTime(_dragStartX!);
       final newDur = max(0.125, _snapTime(orig.duration + rawDelta));
-      final updated = List<Note>.from(track.notes);
-      updated[_dragNoteIndex!] = orig.copyWith(duration: newDur);
-      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
+      _localDragNotes![_dragNoteIndex!] = orig.copyWith(duration: newDur);
     } else {
-      // Raw (un-snapped) delta → snap only the final result → smooth movement
       final rawDeltaTime = _xToTime(curX) - _xToTime(_dragStartX!);
       final rawDeltaPitch = (curY - _dragStartY!) / _noteRowHeight;
       final deltaPitch = rawDeltaPitch.round();
-
       if (rawDeltaTime == 0 && deltaPitch == 0) return;
 
       final indices = _isSelectMode ? _selectedIndices.toList() : [_dragNoteIndex!];
-      final notes = List<Note>.from(track.notes);
       for (final i in indices) {
-        if (i < 0 || i >= notes.length) continue;
+        if (i < 0 || i >= _localDragNotes!.length) continue;
         if (i >= _dragOriginNotes!.length) continue;
         final orig = _dragOriginNotes![i];
-        notes[i] = orig.copyWith(
+        _localDragNotes![i] = orig.copyWith(
           startTime: max(0.0, _snapTime(orig.startTime + rawDeltaTime)),
           pitch: (orig.pitch + deltaPitch).clamp(_minNote, _maxNote),
         );
       }
-      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, notes);
     }
+    setState(() {}); // cheap repaint
   }
 
-  void _onPanEnd(DragEndDetails details, Track track, Project project) {
+  void _onPanEnd(Track track) {
+    if (_localDragNotes != null) {
+      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, _localDragNotes!);
+    }
     setState(() {
       _dragNoteIndex = null;
       _isResizing = false;
       _dragStartX = null;
       _dragStartY = null;
       _dragOriginNotes = null;
+      _localDragNotes = null;
     });
   }
 
@@ -470,9 +522,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
   }
 
-  int? _noteIndexAt(Offset localPos, Track track) {
-    for (int i = track.notes.length - 1; i >= 0; i--) {
-      final n = track.notes[i];
+  int _noteIndexAt(Offset localPos, List<Note> notes) {
+    for (int i = notes.length - 1; i >= 0; i--) {
+      final n = notes[i];
       final y = _pitchToY(n.pitch);
       final x = _timeToX(n.startTime);
       final w = _timeToX(n.duration);
@@ -482,7 +534,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         return i;
       }
     }
-    return null;
+    return -1;
   }
 }
 
