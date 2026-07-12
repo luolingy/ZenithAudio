@@ -161,62 +161,63 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Column(
-        children: [
-          if (screenSize != ScreenSize.mobile) const AudioMenuBar(),
-          const AudioToolBar(),
-          Expanded(
-            child: Listener(
-              onPointerSignal: _onPointerSignal,
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      if (screenSize != ScreenSize.mobile)
-                        const SizedBox(width: AppConstants.trackPanelWidth),
-                      Expanded(
-                        child: ClipRect(
-                          child: SingleChildScrollView(
-                            controller: _rulerScrollCtrl,
-                            scrollDirection: Axis.horizontal,
-                            child: TimelineRuler(
-                              duration: project.duration > 0 ? project.duration : 60,
-                              pixelsPerSecond: pps,
-                              currentPosition: playhead,
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (screenSize != ScreenSize.mobile) const AudioMenuBar(),
+            const AudioToolBar(),
+            Expanded(
+              child: Listener(
+                onPointerSignal: _onPointerSignal,
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        if (screenSize != ScreenSize.mobile)
+                          const SizedBox(width: AppConstants.trackPanelWidth),
+                        Expanded(
+                          child: ClipRect(
+                            child: SingleChildScrollView(
+                              controller: _rulerScrollCtrl,
+                              scrollDirection: Axis.horizontal,
+                              child: TimelineRuler(
+                                duration: project.duration > 0 ? project.duration : 60,
+                                pixelsPerSecond: pps,
+                                currentPosition: playhead,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        const TrackPanel(),
-                        Expanded(
-                          child: ClipRect(
-                            child: Stack(
-                              children: [
-                                project.tracks.isEmpty
-                                    ? _buildEmptyState(context)
-                                    : SingleChildScrollView(
-                                        controller: _waveformScrollCtrl,
-                                        scrollDirection: Axis.horizontal,
-                                        physics: const ClampingScrollPhysics(),
-                                        child: SizedBox(
-                                          width: totalWidth,
-                                          child: ListView.builder(
-                                            itemCount: project.tracks.length,
-                                            itemExtent: AppConstants.trackTileHeight,
-                                            itemBuilder: (context, index) {
-                                              return WaveformView(
-                                                track: project.tracks[index],
-                                                pixelsPerSecond: pps,
-                                              );
-                                            },
+                      ],
+                    ),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          const TrackPanel(),
+                          Expanded(
+                            child: ClipRect(
+                              child: Stack(
+                                children: [
+                                  project.tracks.isEmpty
+                                      ? _buildEmptyState(context)
+                                      : SingleChildScrollView(
+                                          controller: _waveformScrollCtrl,
+                                          scrollDirection: Axis.horizontal,
+                                          physics: const ClampingScrollPhysics(),
+                                          child: SizedBox(
+                                            width: totalWidth,
+                                            child: ListView.builder(
+                                              itemCount: project.tracks.length,
+                                              itemExtent: AppConstants.trackTileHeight,
+                                              itemBuilder: (context, index) {
+                                                return WaveformView(
+                                                  track: project.tracks[index],
+                                                  pixelsPerSecond: pps,
+                                                );
+                                              },
+                                            ),
                                           ),
                                         ),
-                                      ),
                                   if (project.tracks.isNotEmpty)
                                     Positioned(
                                       left: playhead * pps -
@@ -256,19 +257,20 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                         ),
                                       ),
                                     ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const TransportBar(),
-        ],
+            const TransportBar(),
+          ],
+        ),
       ),
     );
   }
