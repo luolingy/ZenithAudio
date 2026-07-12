@@ -34,24 +34,23 @@ class AudioMenuBar extends ConsumerWidget {
                 shortcut: 'shortcut.newProject'.tr(),
                 onTap: () {
                   ref.read(projectProvider.notifier).newProject();
-                  AppLogger.i('新建项目');
+                  AppLogger.i('New project created');
                 },
               ),
               MenuItem(
-                label: 'menu.file.importAudio'.tr(),
-                shortcut: 'shortcut.importAudio'.tr(),
+                label: 'menu.file.openProject'.tr(),
+                shortcut: 'shortcut.openProject'.tr(),
                 onTap: () async {
-                  final fileService = FileService();
-                  final result = await fileService.pickAudioFile();
-                  if (result != null && context.mounted) {
-                    final trackIndex = ref.read(projectProvider).tracks.length + 1;
-                    final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
-                    ref.read(projectProvider.notifier).addTrack(
-                          name: name,
-                          audioFilePath: result.audioSource,
-                        );
-                    AppLogger.i('导入音频: ${result.name}');
-                  }
+                  final notifier = ref.read(projectProvider.notifier);
+                  await notifier.openProject();
+                },
+              ),
+              MenuItem(
+                label: 'menu.file.saveProject'.tr(),
+                shortcut: 'shortcut.saveProject'.tr(),
+                onTap: () async {
+                  final notifier = ref.read(projectProvider.notifier);
+                  await notifier.saveProject();
                 },
               ),
               MenuItem.separator(),
@@ -90,13 +89,48 @@ class AudioMenuBar extends ConsumerWidget {
             label: 'menu.track'.tr(),
             items: [
               MenuItem(
+                label: 'menu.track.importAudio'.tr(),
+                shortcut: 'shortcut.importAudio'.tr(),
+                onTap: () async {
+                  final fileService = FileService();
+                  final result = await fileService.pickAudioFile();
+                  if (result != null && context.mounted) {
+                    final trackIndex = ref.read(projectProvider).tracks.length + 1;
+                    final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
+                    ref.read(projectProvider.notifier).addTrack(
+                          name: name,
+                          audioFilePath: result.audioSource,
+                        );
+                    AppLogger.i('Imported audio: ${result.name}');
+                  }
+                },
+              ),
+              MenuItem(
+                label: 'menu.track.importMidi'.tr(),
+                shortcut: 'shortcut.importMidi'.tr(),
+                onTap: () async {
+                  // TODO: Implement MIDI import
+                  AppLogger.i('MIDI import not yet implemented');
+                },
+              ),
+              const MenuItem.separator(),
+              MenuItem.disabled(
+                label: 'menu.track.addInstrument'.tr(),
+                disabledHint: 'menu.track.comingSoon'.tr(),
+              ),
+              MenuItem.disabled(
+                label: 'menu.track.chooseTemplate'.tr(),
+                disabledHint: 'menu.track.comingSoon'.tr(),
+              ),
+              const MenuItem.separator(),
+              MenuItem(
                 label: 'menu.track.add'.tr(),
                 shortcut: 'shortcut.addTrack'.tr(),
                 onTap: () {
                   final trackIndex = ref.read(projectProvider).tracks.length + 1;
                   final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
                   ref.read(projectProvider.notifier).addTrack(name: name);
-                  AppLogger.i('添加音轨: $name');
+                  AppLogger.i('Added track: $name');
                 },
               ),
               MenuItem(label: 'menu.track.rename'.tr()),
@@ -169,13 +203,33 @@ class MenuItem {
   final String? shortcut;
   final VoidCallback? onTap;
   final bool isSeparator;
+  final bool isDisabled;
+  final String? disabledHint;
 
-  const MenuItem({required this.label, this.shortcut, this.onTap, this.isSeparator = false});
+  const MenuItem({
+    required this.label,
+    this.shortcut,
+    this.onTap,
+    this.isSeparator = false,
+    this.isDisabled = false,
+    this.disabledHint,
+  });
+
   const MenuItem.separator()
       : label = '',
         shortcut = null,
         onTap = null,
-        isSeparator = true;
+        isSeparator = true,
+        isDisabled = false,
+        disabledHint = null;
+
+  const MenuItem.disabled({
+    required this.label,
+    this.disabledHint,
+  }) : shortcut = null,
+       onTap = null,
+       isSeparator = false,
+       isDisabled = true;
 }
 
 class _MenuButton extends StatefulWidget {
@@ -237,18 +291,33 @@ class _MenuButtonState extends State<_MenuButton> {
           else
             PopupMenuItem<MenuItem>(
               value: item,
-              enabled: item.onTap != null,
+              enabled: !item.isDisabled && item.onTap != null,
               onTap: item.onTap,
               height: 28,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(item.label, style: const TextStyle(fontSize: 12)),
+                  if (item.isDisabled && item.disabledHint != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(Icons.lock_outline, size: 12,
+                          color: context.outline.withAlpha(128)),
+                    ),
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: item.isDisabled
+                          ? context.outline.withAlpha(128)
+                          : null,
+                    ),
+                  ),
                   if (item.shortcut != null) ...[
                     const Spacer(),
                     Text(
                       item.shortcut!,
-                      style: TextStyle(fontSize: 10, color: context.outline),
+                      style: TextStyle(fontSize: 10,
+                          color: context.outline.withAlpha(item.isDisabled ? 128 : 255)),
                     ),
                   ],
                 ],

@@ -16,6 +16,7 @@ class AudioService {
   double _masterVolume = 1.0;
 
   void Function(double position)? onPositionChanged;
+  void Function()? onCompleted;
 
   bool get isPlaying => _isPlaying;
 
@@ -27,6 +28,9 @@ class AudioService {
       player.setVolume((_masterVolume * 100).roundToDouble());
     }
   }
+
+  DateTime _lastPositionUpdate = DateTime.now();
+  static const Duration _positionThrottle = Duration(milliseconds: 33); // ~30fps
 
   Future<double> loadTrack(Track track) async {
     if (track.audioFilePath == null) return 0;
@@ -42,10 +46,16 @@ class AudioService {
       _players[track.id] = player;
 
       player.stream.completed.listen((completed) {
-        if (completed) stop();
+        if (completed) {
+          _isPlaying = false;
+          onCompleted?.call();
+        }
       });
 
       player.stream.position.listen((position) {
+        final now = DateTime.now();
+        if (now.difference(_lastPositionUpdate) < _positionThrottle) return;
+        _lastPositionUpdate = now;
         onPositionChanged?.call(position.inMilliseconds / 1000.0);
       });
 

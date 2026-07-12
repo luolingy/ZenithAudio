@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
+import '../../providers/playback_provider.dart';
 
+/// Ruler bar at the top of the waveform area.
+///
+/// Displays time markers and a draggable playhead line.
 class TimelineRuler extends StatelessWidget {
   final double duration;
   final double pixelsPerSecond;
   final double currentPosition;
+  final void Function(double seconds)? onSeek;
 
   const TimelineRuler({
     super.key,
     this.duration = 60,
     this.pixelsPerSecond = 50,
     this.currentPosition = 0,
+    this.onSeek,
   });
 
   @override
@@ -42,6 +48,23 @@ class TimelineRuler extends StatelessWidget {
               ),
             ),
           ),
+          // Draggable playhead overlay.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTapDown: (details) {
+                final sec = (details.localPosition.dx / pixelsPerSecond)
+                    .clamp(0, duration) as double;
+                onSeek?.call(sec);
+              },
+              onHorizontalDragUpdate: (details) {
+                final x = details.localPosition.dx.clamp(0, totalWidth) as double;
+                final sec = (x / pixelsPerSecond).clamp(0, duration) as double;
+                onSeek?.call(sec);
+              },
+            ),
+          ),
+          // Playhead line.
           Positioned(
             left: currentPosition * pixelsPerSecond - 1,
             top: 0, bottom: 0,

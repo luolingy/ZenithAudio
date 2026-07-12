@@ -16,8 +16,25 @@ class AppConstants {
   static const double mobileBreakpoint = 600;
   static const double tabletBreakpoint = 1024;
 
+  /// Project file extension for save/open.
+  static const String projectExtension = '.zap';
+
+  /// Project file format version for forward compatibility.
+  static const int projectFormatVersion = 1;
+
+  /// Subdirectory within .zap archives that stores media assets.
+  static const String projectAssetsDir = 'assets/';
+
+  /// Reserved subdirectories for future media types.
+  static const String projectInstrumentsDir = 'instruments/';
+  static const String projectEffectsDir = 'effects/';
+
   static const List<String> supportedAudioFormats = [
     '.wav', '.mp3', '.flac', '.aac', '.ogg', '.m4a',
+  ];
+
+  static const List<String> supportedMidiFormats = [
+    '.mid', '.midi',
   ];
 }
 

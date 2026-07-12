@@ -63,6 +63,9 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
     _syncing = false;
   }
 
+  /// Auto-follow: scroll waveform view to keep the playhead visible.
+  ///
+  /// Called on each playhead position change via the listener below.
   void _autoScroll(double playheadSec) {
     if (!_waveformScrollCtrl.hasClients) return;
     final playing = ref.read(playbackProvider) == PlaybackState.playing;
@@ -83,9 +86,10 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
       );
     }
 
+    // Reset user-interacted flag once playhead is back in view.
     if (_userInteracted &&
-        playheadScreenX >= 0 &&
-        playheadScreenX <= viewportWidth) {
+        playheadScreenX >= -10 &&
+        playheadScreenX <= viewportWidth + 10) {
       setState(() => _userInteracted = false);
     }
   }
@@ -149,15 +153,21 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
     final project = ref.watch(projectProvider);
     final playhead = ref.watch(playheadPositionProvider);
     final pps = ref.watch(pixelsPerSecondProvider);
-    final playbackState = ref.watch(playbackProvider);
     final cs = Theme.of(context).colorScheme;
     final screenSize = getScreenSize(context);
     final totalWidth = (project.duration > 0 ? project.duration : 60) * pps;
 
-    // Auto-scroll on playhead change
-    if (playbackState == PlaybackState.playing) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _autoScroll(playhead));
-    }
+    // Listen for playback state changes to reset user-interacted on play.
+    ref.listen<PlaybackState>(playbackProvider, (_, next) {
+      if (next == PlaybackState.playing) {
+        setState(() => _userInteracted = false);
+      }
+    });
+
+    // Auto-scroll: run on each playhead update while playing.
+    ref.listen<double>(playheadPositionProvider, (_, pos) {
+      _autoScroll(pos);
+    });
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -184,6 +194,8 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                 duration: project.duration > 0 ? project.duration : 60,
                                 pixelsPerSecond: pps,
                                 currentPosition: playhead,
+                                onSeek: (sec) =>
+                                    ref.read(playbackProvider.notifier).seekTo(sec),
                               ),
                             ),
                           ),
@@ -218,6 +230,7 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                             ),
                                           ),
                                         ),
+                                  // Playhead line overlay.
                                   if (project.tracks.isNotEmpty)
                                     Positioned(
                                       left: playhead * pps -

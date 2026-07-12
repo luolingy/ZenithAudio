@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/audio_service.dart';
+import 'settings_provider.dart';
 
 enum PlaybackState { stopped, playing, paused }
 
@@ -16,10 +17,29 @@ final pixelsPerSecondProvider = StateProvider<double>((ref) => 50.0);
 class PlaybackNotifier extends Notifier<PlaybackState> {
   @override
   PlaybackState build() {
-    ref.read(audioServiceProvider).onPositionChanged = (pos) {
+    final audio = ref.read(audioServiceProvider);
+    audio.onPositionChanged = (pos) {
       ref.read(playheadPositionProvider.notifier).state = pos;
     };
+    audio.onCompleted = () {
+      // When playback naturally completes, check auto-loop setting.
+      final settings = ref.read(settingsProvider);
+      if (settings.autoLoop) {
+        // Seek to beginning and play again.
+        _restart();
+      } else {
+        state = PlaybackState.stopped;
+        ref.read(playheadPositionProvider.notifier).state = 0;
+      }
+    };
     return PlaybackState.stopped;
+  }
+
+  Future<void> _restart() async {
+    await ref.read(audioServiceProvider).seekTo(0);
+    ref.read(playheadPositionProvider.notifier).state = 0;
+    await ref.read(audioServiceProvider).play();
+    state = PlaybackState.playing;
   }
 
   Future<void> play() async {

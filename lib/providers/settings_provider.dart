@@ -8,16 +8,19 @@ final settingsProvider = NotifierProvider<SettingsNotifier, SettingsState>(
 class SettingsState {
   final ThemeMode themeMode;
   final Locale locale;
+  final bool autoLoop;
 
   const SettingsState({
     this.themeMode = ThemeMode.system,
     this.locale = const Locale('zh'),
+    this.autoLoop = false,
   });
 
-  SettingsState copyWith({ThemeMode? themeMode, Locale? locale}) {
+  SettingsState copyWith({ThemeMode? themeMode, Locale? locale, bool? autoLoop}) {
     return SettingsState(
       themeMode: themeMode ?? this.themeMode,
       locale: locale ?? this.locale,
+      autoLoop: autoLoop ?? this.autoLoop,
     );
   }
 }
@@ -32,5 +35,9 @@ class SettingsNotifier extends Notifier<SettingsState> {
 
   void setLocale(Locale locale) {
     state = state.copyWith(locale: locale);
+  }
+
+  void setAutoLoop(bool value) {
+    state = state.copyWith(autoLoop: value);
   }
 }

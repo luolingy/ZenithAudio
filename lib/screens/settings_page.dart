@@ -8,7 +8,7 @@ import '../core/utils/responsive_utils.dart';
 import '../core/utils/platform_utils.dart';
 import '../providers/settings_provider.dart';
 
-enum SettingsTab { general, about }
+enum SettingsTab { general, playback, about }
 
 final settingsTabProvider = StateProvider<SettingsTab>((ref) => SettingsTab.general);
 
@@ -72,6 +72,8 @@ class SettingsPage extends ConsumerWidget {
     switch (tab) {
       case SettingsTab.general:
         return _GeneralContent(settings: settings, ref: ref);
+      case SettingsTab.playback:
+        return _PlaybackContent(settings: settings, ref: ref);
       case SettingsTab.about:
         return _AboutContent();
     }
@@ -99,6 +101,12 @@ class _Sidebar extends StatelessWidget {
             label: 'settings.general'.tr(),
             selected: currentTab == SettingsTab.general,
             onTap: () => onTabChanged(SettingsTab.general),
+          ),
+          _SidebarItem(
+            icon: Icons.play_circle_outline,
+            label: 'settings.playbackSection'.tr(),
+            selected: currentTab == SettingsTab.playback,
+            onTap: () => onTabChanged(SettingsTab.playback),
           ),
           const Spacer(),
           _SidebarItem(
@@ -173,6 +181,12 @@ class _MobileTabBar extends StatelessWidget {
             label: 'settings.general'.tr(),
             selected: currentTab == SettingsTab.general,
             onTap: () => onTabChanged(SettingsTab.general),
+          ),
+          _MobileTabItem(
+            icon: Icons.play_circle_outline,
+            label: 'settings.playbackSection'.tr(),
+            selected: currentTab == SettingsTab.playback,
+            onTap: () => onTabChanged(SettingsTab.playback),
           ),
           _MobileTabItem(
             icon: Icons.info_outline,
@@ -298,7 +312,33 @@ class _GeneralContent extends StatelessWidget {
   }
 }
 
-// ──────────────────────────── About Content ────────────────────────────
+// ──────────────────────────── Playback Content ────────────────────────────
+
+class _PlaybackContent extends StatelessWidget {
+  final SettingsState settings;
+  final WidgetRef ref;
+
+  const _PlaybackContent({required this.settings, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text('settings.playback.autoLoop'.tr(), style: TextStyle(
+          color: context.outline, fontSize: 10,
+          fontWeight: FontWeight.w600, letterSpacing: 1,
+        )),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          title: Text('settings.playback.autoLoopDesc'.tr()),
+          value: settings.autoLoop,
+          onChanged: (v) => ref.read(settingsProvider.notifier).setAutoLoop(v),
+        ),
+      ],
+    );
+  }
+}
 
 class _AboutContent extends StatelessWidget {
   @override

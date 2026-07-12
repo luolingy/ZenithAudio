@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
-import '../../core/utils/theme_colors.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
-import '../../services/file_service.dart';
 import '../../core/utils/logger.dart';
 
 class AudioToolBar extends ConsumerWidget {
@@ -30,29 +28,24 @@ class AudioToolBar extends ConsumerWidget {
             tooltip: 'toolbar.newProject'.tr(),
             onTap: () {
               ref.read(projectProvider.notifier).newProject();
-              AppLogger.i('新建项目');
+              AppLogger.i('New project');
             },
           ),
           _ToolButton(
-            icon: Icons.file_open_outlined,
-            tooltip: 'toolbar.importAudio'.tr(),
+            icon: Icons.folder_open_outlined,
+            tooltip: 'toolbar.openProject'.tr(),
             onTap: () async {
-              final fileService = FileService();
-              final result = await fileService.pickAudioFile();
-              if (result != null && context.mounted) {
-                final trackIndex = ref.read(projectProvider).tracks.length + 1;
-                final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
-                ref.read(projectProvider.notifier).addTrack(
-                      name: name,
-                      audioFilePath: result.audioSource,
-                    );
-                AppLogger.i('导入音频: ${result.name}');
-              }
+              final notifier = ref.read(projectProvider.notifier);
+              await notifier.openProject();
             },
           ),
           _ToolButton(
             icon: Icons.save_outlined,
-            tooltip: 'toolbar.save'.tr(),
+            tooltip: 'toolbar.saveProject'.tr(),
+            onTap: () async {
+              final notifier = ref.read(projectProvider.notifier);
+              await notifier.saveProject();
+            },
           ),
           const _ToolDivider(),
           _ToolButton(
@@ -84,7 +77,7 @@ class AudioToolBar extends ConsumerWidget {
               final trackIndex = ref.read(projectProvider).tracks.length + 1;
               final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
               ref.read(projectProvider.notifier).addTrack(name: name);
-              AppLogger.i('添加音轨: $name');
+              AppLogger.i('Added track: $name');
             },
           ),
           _ToolButton(
@@ -134,17 +127,17 @@ class _ToolButton extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Tooltip(
         message: tooltip,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(4),
-            hoverColor: context.surfaceHigh,
-            child: Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              child: Icon(icon, size: 18, color: cs.onSurfaceVariant),
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: IconButton(
+            onPressed: onTap,
+            icon: Icon(icon, size: 18, color: cs.onSurfaceVariant),
+            padding: EdgeInsets.zero,
+            splashRadius: 16,
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
             ),
           ),
         ),
