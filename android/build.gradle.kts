@@ -20,9 +20,9 @@ subprojects {
 }
 subprojects {
     afterEvaluate {
-        val androidExt = project.extensions.findByName("android")
-        if (androidExt is com.android.build.gradle.BaseExtension) {
-            androidExt.compileSdk = 36
+        val androidExt = project.extensions.findByName("android") ?: return@afterEvaluate
+        if (androidExt is com.android.build.api.dsl.CommonExtension<*, *, *>) {
+            androidExt.compileSdk.set(36)
         }
     }
 }
