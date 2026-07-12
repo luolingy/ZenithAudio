@@ -109,14 +109,18 @@ class AudioMenuBar extends ConsumerWidget {
                 label: 'menu.track.importMidi'.tr(),
                 shortcut: 'shortcut.importMidi'.tr(),
                 onTap: () async {
-                  // TODO: Implement MIDI import
                   AppLogger.i('MIDI import not yet implemented');
                 },
               ),
               const MenuItem.separator(),
-              MenuItem.disabled(
+              MenuItem(
                 label: 'menu.track.addInstrument'.tr(),
-                disabledHint: 'menu.track.comingSoon'.tr(),
+                onTap: () {
+                  final trackIndex = ref.read(projectProvider).tracks.length + 1;
+                  final name = 'Track $trackIndex';
+                  ref.read(projectProvider.notifier).addInstrumentTrack(name: name);
+                  AppLogger.i('Added instrument track: $name');
+                },
               ),
               MenuItem.disabled(
                 label: 'menu.track.chooseTemplate'.tr(),

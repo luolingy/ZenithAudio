@@ -15,7 +15,7 @@ class Project {
   });
 
   double get duration =>
-      tracks.fold<double>(0, (m, t) => max(t.duration, m));
+      tracks.fold<double>(0, (m, t) => max(t.computedDuration, m));
 
   Project copyWith({
     String? id,

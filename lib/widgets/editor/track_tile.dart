@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
 import '../../models/track.dart';
+import '../../models/instrument.dart';
 import '../../providers/project_provider.dart';
 
 String _formatDuration(double sec) {
@@ -60,7 +61,12 @@ class TrackTile extends ConsumerWidget {
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 4),
+                  if (track.type == TrackType.instrument)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(Icons.piano_outlined, size: 12, color: cs.primary),
+                    ),
                   Expanded(
                     child: Text(
                       track.name,
@@ -158,21 +164,28 @@ class TrackTile extends ConsumerWidget {
     if (renderBox == null) return;
     final globalPos = renderBox.localToGlobal(localPos);
 
+    final items = <PopupMenuEntry<String>>[
+      const PopupMenuItem(value: 'rename', child: Text('重命名')),
+      const PopupMenuItem(value: 'properties', child: Text('属性')),
+    ];
+    if (track.type == TrackType.instrument) {
+      items.add(const PopupMenuItem(value: 'changeInstrument', child: Text('更换乐器')));
+    }
+    items.add(const PopupMenuItem(value: 'delete', child: Text('删除')));
+
     showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
           globalPos.dx, globalPos.dy, globalPos.dx + 1, globalPos.dy + 1),
-      items: [
-        const PopupMenuItem(value: 'rename', child: Text('重命名')),
-        const PopupMenuItem(value: 'properties', child: Text('属性')),
-        const PopupMenuItem(value: 'delete', child: Text('删除')),
-      ],
+      items: items,
     ).then((value) {
       switch (value) {
         case 'rename':
           _showRenameDialog(context, ref);
         case 'properties':
           _showPropertiesDialog(context);
+        case 'changeInstrument':
+          _showChangeInstrumentDialog(context, ref);
         case 'delete':
           _showDeleteDialog(context, ref);
       }
@@ -206,6 +219,38 @@ class TrackTile extends ConsumerWidget {
     }
   }
 
+  void _showChangeInstrumentDialog(BuildContext context, WidgetRef ref) {
+    final current = track.instrumentName ?? 'piano';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('更换乐器'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final preset in InstrumentPreset.presets)
+              RadioListTile<String>(
+                title: Text(preset.name),
+                value: preset.type.name,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(projectProvider.notifier).setTrackInstrument(track.id, v);
+                    Navigator.of(ctx).pop();
+                  }
+                },
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消')),
+        ],
+      ),
+    );
+  }
+
   void _showPropertiesDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -216,6 +261,15 @@ class TrackTile extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('名称: ${track.name}'),
+            const SizedBox(height: 8),
+            Text('类型: ${track.type == TrackType.instrument ? "乐器" : "音频"}'),
+            if (track.type == TrackType.instrument && track.instrumentName != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('乐器: ${track.instrumentName}'),
+              ),
+            const SizedBox(height: 8),
+            Text('音符: ${track.notes.length}'),
             const SizedBox(height: 8),
             Text('时长: ${_formatDuration(track.duration)}'),
           ],

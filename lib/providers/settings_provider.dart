@@ -9,18 +9,34 @@ class SettingsState {
   final ThemeMode themeMode;
   final Locale locale;
   final bool autoLoop;
+  final String pianoRollEditMode;
+  final bool snapToGrid;
+  final double gridResolution;
 
   const SettingsState({
     this.themeMode = ThemeMode.system,
     this.locale = const Locale('zh'),
     this.autoLoop = false,
+    this.pianoRollEditMode = 'basic',
+    this.snapToGrid = true,
+    this.gridResolution = 0.25,
   });
 
-  SettingsState copyWith({ThemeMode? themeMode, Locale? locale, bool? autoLoop}) {
+  SettingsState copyWith({
+    ThemeMode? themeMode,
+    Locale? locale,
+    bool? autoLoop,
+    String? pianoRollEditMode,
+    bool? snapToGrid,
+    double? gridResolution,
+  }) {
     return SettingsState(
       themeMode: themeMode ?? this.themeMode,
       locale: locale ?? this.locale,
       autoLoop: autoLoop ?? this.autoLoop,
+      pianoRollEditMode: pianoRollEditMode ?? this.pianoRollEditMode,
+      snapToGrid: snapToGrid ?? this.snapToGrid,
+      gridResolution: gridResolution ?? this.gridResolution,
     );
   }
 }
@@ -39,5 +55,17 @@ class SettingsNotifier extends Notifier<SettingsState> {
 
   void setAutoLoop(bool value) {
     state = state.copyWith(autoLoop: value);
+  }
+
+  void setPianoRollEditMode(String mode) {
+    state = state.copyWith(pianoRollEditMode: mode);
+  }
+
+  void setSnapToGrid(bool value) {
+    state = state.copyWith(snapToGrid: value);
+  }
+
+  void setGridResolution(double value) {
+    state = state.copyWith(gridResolution: value);
   }
 }

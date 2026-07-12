@@ -14,6 +14,8 @@ import '../controls/transport_bar.dart';
 import 'timeline_ruler.dart';
 import 'track_panel.dart';
 import 'waveform_view.dart';
+import 'piano_roll_track.dart';
+import '../../models/track.dart';
 
 class AudioEditor extends ConsumerStatefulWidget {
   const AudioEditor({super.key});
@@ -222,8 +224,18 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                               itemCount: project.tracks.length,
                                               itemExtent: AppConstants.trackTileHeight,
                                               itemBuilder: (context, index) {
+                                                final tr = project.tracks[index];
+                                                if (tr.type == TrackType.instrument) {
+                                                  return PianoRollTrack(
+                                                    track: tr,
+                                                    pixelsPerSecond: pps,
+                                                    onNotesChanged: (notes) =>
+                                                        ref.read(projectProvider.notifier)
+                                                            .updateTrackNotes(tr.id, notes),
+                                                  );
+                                                }
                                                 return WaveformView(
-                                                  track: project.tracks[index],
+                                                  track: tr,
                                                   pixelsPerSecond: pps,
                                                 );
                                               },

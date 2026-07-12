@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 import '../core/constants/app_constants.dart';
 import '../models/project.dart';
 import '../models/track.dart';
+import '../models/note.dart';
 import '../core/utils/logger.dart';
 
 /// Result returned after deserializing a project archive on web.
@@ -133,17 +134,21 @@ class ProjectSerializer {
   Map<String, dynamic> _buildInfoJson(Project project) {
     final tracksJson = project.tracks.map((t) {
       String? audioFile;
-      if (t.audioFilePath != null) {
+      if (t.type == TrackType.audio && t.audioFilePath != null) {
         final ext = _extensionFromPath(t.audioFilePath!) ?? '.wav';
         audioFile = '${AppConstants.projectAssetsDir}audio_${t.id}$ext';
       }
       return {
         'id': t.id,
         'name': t.name,
+        'type': t.type.name,
         'volume': t.volume,
         'isMuted': t.isMuted,
         'isSolo': t.isSolo,
-        'audioFile': audioFile,
+        if (t.type == TrackType.audio) 'audioFile': audioFile,
+        if (t.type == TrackType.instrument) 'instrumentName': t.instrumentName,
+        if (t.type == TrackType.instrument && t.notes.isNotEmpty)
+          'notes': t.notes.map((n) => n.toJson()).toList(),
         'color': '#${t.color.toARGB32().toRadixString(16).padLeft(8, '0')}',
         'duration': t.duration,
       };
@@ -169,9 +174,20 @@ class ProjectSerializer {
 
     final tracks = tracksJson.map((j) {
       final t = j as Map<String, dynamic>;
+      final typeStr = t['type'] as String? ?? 'audio';
+      final type = TrackType.values.firstWhere(
+        (e) => e.name == typeStr,
+        orElse: () => TrackType.audio,
+      );
       return Track(
         id: t['id'] as String? ?? '',
         name: t['name'] as String? ?? 'Track',
+        type: type,
+        instrumentName: t['instrumentName'] as String?,
+        notes: type == TrackType.instrument
+            ? ((t['notes'] as List<dynamic>?)?.map((n) =>
+                Note.fromJson(n as Map<String, dynamic>)).toList() ?? [])
+            : const [],
         volume: (t['volume'] as num?)?.toDouble() ?? 0.8,
         isMuted: t['isMuted'] as bool? ?? false,
         isSolo: t['isSolo'] as bool? ?? false,

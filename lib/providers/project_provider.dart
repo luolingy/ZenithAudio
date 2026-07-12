@@ -7,10 +7,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../models/project.dart';
 import '../models/track.dart';
+import '../models/note.dart';
 import '../core/constants/app_constants.dart';
 import '../core/utils/logger.dart';
 import '../services/audio_service.dart';
 import '../services/project_serializer.dart';
+import '../services/synth_service.dart';
 
 final projectProvider = NotifierProvider<ProjectNotifier, Project>(
   ProjectNotifier.new,
@@ -32,34 +34,20 @@ class ProjectNotifier extends Notifier<Project> {
 
   // ──── Save / Open ────
 
-  /// Serialize and save the current project to a .zap file.
-  ///
-  /// On desktop, uses FilePicker.saveFile() to let the user choose a location.
-  /// On web, triggers a browser download.
   Future<void> saveProject() async {
     try {
       AppLogger.i('Saving project...');
 
-      // 1. Collect audio file bytes for each track.
       final audioBytes = <String, Uint8List>{};
-      final audioService = ref.read(audioServiceProvider);
 
-      // On web, fetch audio bytes from blob URLs if available.
-      // On desktop, the serializer reads from disk directly.
-
-      // 2. Serialize project to .zap bytes.
       final serializer = ProjectSerializer();
       final bytes = await serializer.serialize(state, audioFileBytes: audioBytes);
 
-      // 3. Save to file.
       if (kIsWeb) {
-        // Web: trigger browser download.
-        // ignore: undefined_prefixed_name
         final webSerializer = ProjectSerializer();
         webSerializer.downloadArchive(bytes, '${state.name}${AppConstants.projectExtension}');
         AppLogger.i('Project saved via browser download');
       } else {
-        // Desktop: use file picker save dialog.
         String? outputPath;
         if (_currentFilePath != null && await File(_currentFilePath!).exists()) {
           outputPath = _currentFilePath;
@@ -83,15 +71,10 @@ class ProjectNotifier extends Notifier<Project> {
     }
   }
 
-  /// Open and load a .zap project file.
-  ///
-  /// On desktop, uses FilePicker.pickFiles() to select a file.
-  /// On web, uses the browser file upload dialog.
   Future<void> openProject() async {
     try {
       AppLogger.i('Opening project...');
 
-      // 1. Pick the .zap file.
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['zap'],
@@ -101,7 +84,6 @@ class ProjectNotifier extends Notifier<Project> {
 
       final file = result.files.single;
 
-      // 2. Read bytes (handles both web and desktop).
       Uint8List bytes;
       if (kIsWeb) {
         bytes = file.bytes!;
@@ -112,7 +94,6 @@ class ProjectNotifier extends Notifier<Project> {
         return;
       }
 
-      // 3. Deserialize project.
       final serializer = ProjectSerializer();
       final serialized = await serializer.deserialize(bytes);
       if (serialized == null) {
@@ -120,27 +101,28 @@ class ProjectNotifier extends Notifier<Project> {
         return;
       }
 
-      // 4. Unload old audio and load new.
       final audioService = ref.read(audioServiceProvider);
       audioService.unloadAll();
 
-      // 5. Apply new project state.
-      // Update track audio paths with extracted locations.
       final updatedTracks = serialized.project.tracks.map((t) {
-        final audioPath = serialized.trackAudioFiles[t.id];
-        return audioPath != null ? t.copyWith(audioFilePath: audioPath) : t;
+        if (t.type == TrackType.audio) {
+          final audioPath = serialized.trackAudioFiles[t.id];
+          return audioPath != null ? t.copyWith(audioFilePath: audioPath) : t;
+        }
+        return t;
       }).toList();
       state = serialized.project.copyWith(tracks: updatedTracks);
 
-      // 6. Load audio for each track.
       for (final track in state.tracks) {
-        if (track.audioFilePath != null) {
+        if (track.type == TrackType.audio && track.audioFilePath != null) {
           audioService.loadTrack(track).then((dur) {
             final updated = track.copyWith(duration: dur);
             state = state.copyWith(
               tracks: state.tracks.map((t) => t.id == track.id ? updated : t).toList(),
             );
           });
+        } else if (track.type == TrackType.instrument) {
+          _renderAndLoadInstrument(track);
         }
       }
 
@@ -152,21 +134,12 @@ class ProjectNotifier extends Notifier<Project> {
 
   // ──── Track management ────
 
-  void addTrack({String? name, String? audioFilePath}) {
-    final trackColors = [
-      const Color(0xFF40C4FF),
-      const Color(0xFF69F0AE),
-      const Color(0xFFFFD740),
-      const Color(0xFFFF8A65),
-      const Color(0xFFCE93D8),
-      const Color(0xFF4DB6AC),
-      const Color(0xFFF06292),
-      const Color(0xFFAED581),
-    ];
-
+  void addAudioTrack({String? name, String? audioFilePath}) {
+    final trackColors = _trackColors();
     final track = Track(
       id: _uuid.v4(),
-      name: name ?? 'track ${state.tracks.length + 1}',
+      name: name ?? 'Track ${state.tracks.length + 1}',
+      type: TrackType.audio,
       volume: 0.8,
       audioFilePath: audioFilePath,
       color: trackColors[state.tracks.length % trackColors.length],
@@ -182,7 +155,62 @@ class ProjectNotifier extends Notifier<Project> {
         AppLogger.d('Track "${track.name}" duration: ${dur.toStringAsFixed(1)}s');
       });
     }
-    AppLogger.i('Added track: ${track.name}');
+    AppLogger.i('Added audio track: ${track.name}');
+  }
+
+  void addInstrumentTrack({String? name, String? instrumentName}) {
+    final trackColors = _trackColors();
+    final track = Track(
+      id: _uuid.v4(),
+      name: name ?? 'Track ${state.tracks.length + 1}',
+      type: TrackType.instrument,
+      instrumentName: instrumentName ?? 'piano',
+      volume: 0.8,
+      color: trackColors[state.tracks.length % trackColors.length],
+    );
+
+    state = state.copyWith(tracks: [...state.tracks, track]);
+    _renderAndLoadInstrument(track);
+    AppLogger.i('Added instrument track: ${track.name}');
+  }
+
+  void addTrack({String? name, String? audioFilePath}) {
+    addAudioTrack(name: name, audioFilePath: audioFilePath);
+  }
+
+  Future<void> _renderAndLoadInstrument(Track track) async {
+    try {
+      final synth = SynthService();
+      final audio = ref.read(audioServiceProvider);
+
+      late String audioPath;
+      late double dur;
+      if (kIsWeb) {
+        final result = await synth.renderToFile(
+          notes: track.notes,
+          instrumentName: track.instrumentName ?? 'piano',
+        );
+        audioPath = result.path;
+        dur = result.duration;
+      } else {
+        final result = await synth.renderToFile(
+          notes: track.notes,
+          instrumentName: track.instrumentName ?? 'piano',
+        );
+        audioPath = result.path;
+        dur = result.duration;
+      }
+
+      if (audioPath.isNotEmpty) {
+        final loaded = track.copyWith(audioFilePath: audioPath, duration: dur);
+        await audio.loadTrack(loaded);
+        state = state.copyWith(
+          tracks: state.tracks.map((t) => t.id == track.id ? loaded : t).toList(),
+        );
+      }
+    } catch (e) {
+      AppLogger.e('Failed to render instrument track', e);
+    }
   }
 
   void removeTrack(String trackId) {
@@ -261,10 +289,44 @@ class ProjectNotifier extends Notifier<Project> {
     );
   }
 
+  void updateTrackNotes(String trackId, List<Note> notes) {
+    state = state.copyWith(
+      tracks: state.tracks.map((t) {
+        if (t.id == trackId) return t.copyWith(notes: notes);
+        return t;
+      }).toList(),
+    );
+    // Re-render and reload the instrument audio.
+    final track = state.tracks.firstWhere((t) => t.id == trackId);
+    _renderAndLoadInstrument(track);
+  }
+
+  void setTrackInstrument(String trackId, String instrumentName) {
+    state = state.copyWith(
+      tracks: state.tracks.map((t) {
+        if (t.id == trackId) return t.copyWith(instrumentName: instrumentName);
+        return t;
+      }).toList(),
+    );
+    final track = state.tracks.firstWhere((t) => t.id == trackId);
+    _renderAndLoadInstrument(track);
+  }
+
   void newProject() {
     ref.read(audioServiceProvider).unloadAll();
     _currentFilePath = null;
     state = Project(id: _uuid.v4(), name: 'Untitled');
     AppLogger.i('New project created');
   }
+
+  List<Color> _trackColors() => [
+    const Color(0xFF40C4FF),
+    const Color(0xFF69F0AE),
+    const Color(0xFFFFD740),
+    const Color(0xFFFF8A65),
+    const Color(0xFFCE93D8),
+    const Color(0xFF4DB6AC),
+    const Color(0xFFF06292),
+    const Color(0xFFAED581),
+  ];
 }

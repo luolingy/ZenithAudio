@@ -75,9 +75,19 @@ class AudioToolBar extends ConsumerWidget {
             tooltip: 'toolbar.addTrack'.tr(),
             onTap: () {
               final trackIndex = ref.read(projectProvider).tracks.length + 1;
-              final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
+              final name = 'Track $trackIndex';
               ref.read(projectProvider.notifier).addTrack(name: name);
-              AppLogger.i('Added track: $name');
+              AppLogger.i('Added audio track: $name');
+            },
+          ),
+          _ToolButton(
+            icon: Icons.piano_outlined,
+            tooltip: 'toolbar.addInstrumentTrack'.tr(),
+            onTap: () {
+              final trackIndex = ref.read(projectProvider).tracks.length + 1;
+              final name = 'Track $trackIndex';
+              ref.read(projectProvider.notifier).addInstrumentTrack(name: name);
+              AppLogger.i('Added instrument track: $name');
             },
           ),
           _ToolButton(

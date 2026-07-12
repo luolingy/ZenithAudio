@@ -8,7 +8,7 @@ import '../core/utils/responsive_utils.dart';
 import '../core/utils/platform_utils.dart';
 import '../providers/settings_provider.dart';
 
-enum SettingsTab { general, playback, about }
+enum SettingsTab { general, playback, pianoRoll, about }
 
 final settingsTabProvider = StateProvider<SettingsTab>((ref) => SettingsTab.general);
 
@@ -74,6 +74,8 @@ class SettingsPage extends ConsumerWidget {
         return _GeneralContent(settings: settings, ref: ref);
       case SettingsTab.playback:
         return _PlaybackContent(settings: settings, ref: ref);
+      case SettingsTab.pianoRoll:
+        return _PianoRollSettingsContent(settings: settings, ref: ref);
       case SettingsTab.about:
         return _AboutContent();
     }
@@ -107,6 +109,12 @@ class _Sidebar extends StatelessWidget {
             label: 'settings.playbackSection'.tr(),
             selected: currentTab == SettingsTab.playback,
             onTap: () => onTabChanged(SettingsTab.playback),
+          ),
+          _SidebarItem(
+            icon: Icons.grid_view_outlined,
+            label: 'settings.pianoRollSection'.tr(),
+            selected: currentTab == SettingsTab.pianoRoll,
+            onTap: () => onTabChanged(SettingsTab.pianoRoll),
           ),
           const Spacer(),
           _SidebarItem(
@@ -187,6 +195,12 @@ class _MobileTabBar extends StatelessWidget {
             label: 'settings.playbackSection'.tr(),
             selected: currentTab == SettingsTab.playback,
             onTap: () => onTabChanged(SettingsTab.playback),
+          ),
+          _MobileTabItem(
+            icon: Icons.grid_view_outlined,
+            label: 'settings.pianoRollSection'.tr(),
+            selected: currentTab == SettingsTab.pianoRoll,
+            onTap: () => onTabChanged(SettingsTab.pianoRoll),
           ),
           _MobileTabItem(
             icon: Icons.info_outline,
@@ -335,6 +349,87 @@ class _PlaybackContent extends StatelessWidget {
           value: settings.autoLoop,
           onChanged: (v) => ref.read(settingsProvider.notifier).setAutoLoop(v),
         ),
+      ],
+    );
+  }
+}
+
+// ──────────────────────────── Piano Roll Settings ────────────────────────────
+
+class _PianoRollSettingsContent extends StatelessWidget {
+  final SettingsState settings;
+  final WidgetRef ref;
+
+  const _PianoRollSettingsContent({required this.settings, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text('settings.pianoRoll.editMode'.tr(), style: TextStyle(
+          color: context.outline, fontSize: 10,
+          fontWeight: FontWeight.w600, letterSpacing: 1,
+        )),
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: settings.pianoRollEditMode,
+              isExpanded: true,
+              items: [
+                DropdownMenuItem(value: 'basic', child: Text('settings.pianoRoll.basic'.tr())),
+                DropdownMenuItem(value: 'advanced', child: Text('settings.pianoRoll.advanced'.tr())),
+              ],
+              onChanged: (v) {
+                if (v != null) ref.read(settingsProvider.notifier).setPianoRollEditMode(v);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Text('settings.pianoRoll.snapToGrid'.tr(), style: TextStyle(
+          color: context.outline, fontSize: 10,
+          fontWeight: FontWeight.w600, letterSpacing: 1,
+        )),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          title: Text('settings.pianoRoll.snapToGridDesc'.tr()),
+          value: settings.snapToGrid,
+          onChanged: (v) => ref.read(settingsProvider.notifier).setSnapToGrid(v),
+        ),
+        if (settings.snapToGrid) ...[
+          const SizedBox(height: 16),
+          Text('settings.pianoRoll.gridResolution'.tr(), style: TextStyle(
+            color: context.outline, fontSize: 10,
+            fontWeight: FontWeight.w600, letterSpacing: 1,
+          )),
+          const SizedBox(height: 8),
+          InputDecorator(
+            decoration: InputDecoration(
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<double>(
+                value: settings.gridResolution,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(value: 1.0, child: Text('1/4')),
+                  DropdownMenuItem(value: 0.5, child: Text('1/8')),
+                  DropdownMenuItem(value: 0.25, child: Text('1/16')),
+                ],
+                onChanged: (v) {
+                  if (v != null) ref.read(settingsProvider.notifier).setGridResolution(v);
+                },
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

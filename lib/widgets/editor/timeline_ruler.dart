@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
-import '../../providers/playback_provider.dart';
 
 /// Ruler bar at the top of the waveform area.
 ///

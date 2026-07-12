@@ -16,6 +16,7 @@ class AudioService {
   double _masterVolume = 1.0;
 
   void Function(double position)? onPositionChanged;
+  void Function()? onCompleted;
 
   bool get isPlaying => _isPlaying;
 
@@ -50,7 +51,10 @@ class AudioService {
       tp.endedSub = element.onEnded.listen((_) {
         final allEnded =
             _players.values.every((p) => p.element.ended || p.element.paused);
-        if (allEnded) _isPlaying = false;
+        if (allEnded) {
+          _isPlaying = false;
+          onCompleted?.call();
+        }
       });
 
       _players[track.id] = tp;
