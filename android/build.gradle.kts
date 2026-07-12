@@ -18,14 +18,6 @@ subprojects {
 subprojects {
     project.evaluationDependsOn(":app")
 }
-subprojects {
-    afterEvaluate {
-        val androidExt = project.extensions.findByName("android") ?: return@afterEvaluate
-        if (androidExt is com.android.build.api.dsl.CommonExtension) {
-            androidExt.compileSdk = 36
-        }
-    }
-}
 
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
