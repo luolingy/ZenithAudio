@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
-import '../../models/instrument.dart';
+import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../core/utils/logger.dart';

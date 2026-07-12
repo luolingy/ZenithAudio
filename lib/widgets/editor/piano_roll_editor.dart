@@ -8,9 +8,6 @@ import '../../providers/project_provider.dart';
 import '../../providers/settings_provider.dart';
 
 /// Full-screen piano roll editor for a single instrument track.
-///
-/// Range: C0 (MIDI 12) to C8 (MIDI 108). Notes are drawn as horizontal bars;
-/// vertical position = pitch, length = duration. Supports drag, resize, snap.
 class PianoRollEditor extends ConsumerStatefulWidget {
   final String trackId;
 
@@ -24,38 +21,76 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   Track get _track =>
       ref.read(projectProvider).tracks.firstWhere((t) => t.id == widget.trackId);
 
-  // Viewport / zoom
-  double _pps = 80;
-  double _noteRowHeight = 10;
+  static const double _basePps = 40;
+  static const double _baseRowH = 5;
 
-  // Scrolling
+  double _zoomLevel = 2.0;
+  double get _pps => (_basePps * _zoomLevel).clamp(20, 600);
+  double get _noteRowHeight => (_baseRowH * _zoomLevel).clamp(4, 60);
+
+  // Scrolling — separate controllers for keyboard & grid to avoid "attached to multiple positions"
   final ScrollController _hScrollCtrl = ScrollController();
-  final ScrollController _vScrollCtrl = ScrollController();
+  final ScrollController _keyVScrollCtrl = ScrollController();
+  final ScrollController _gridVScrollCtrl = ScrollController();
+  bool _isSyncing = false;
 
-  static const int _minNote = 12;  // C0
-  static const int _maxNote = 108; // C8
+  static const int _minNote = 12;
+  static const int _maxNote = 108;
   static const int _noteCount = _maxNote - _minNote + 1;
 
-  // ─── Edit / Select mode ───
   bool _isSelectMode = false;
   final Set<int> _selectedIndices = {};
 
-  // ─── Drag state ───
   int? _dragNoteIndex;
   bool _isResizing = false;
   double? _dragStartX;
   double? _dragStartY;
-  List<Note>? _dragOriginNotes; // snapshot of notes at drag start
+  List<Note>? _dragOriginNotes;
+
+  // ── Viewport pan state ──
+  bool _isPanning = false;
+  int _activePointers = 0;
+  double? _panStartX;
+  double? _panStartY;
+  double? _panOffX;
+  double? _panOffY;
+
+  @override
+  void initState() {
+    super.initState();
+    _keyVScrollCtrl.addListener(_syncKeyToGrid);
+    _gridVScrollCtrl.addListener(_syncGridToKey);
+  }
+
+  void _syncKeyToGrid() {
+    if (_isSyncing) return;
+    _isSyncing = true;
+    if (_gridVScrollCtrl.hasClients) {
+      _gridVScrollCtrl.jumpTo(_keyVScrollCtrl.offset);
+    }
+    _isSyncing = false;
+  }
+
+  void _syncGridToKey() {
+    if (_isSyncing) return;
+    _isSyncing = true;
+    if (_keyVScrollCtrl.hasClients) {
+      _keyVScrollCtrl.jumpTo(_gridVScrollCtrl.offset);
+    }
+    _isSyncing = false;
+  }
 
   @override
   void dispose() {
+    _keyVScrollCtrl.removeListener(_syncKeyToGrid);
+    _gridVScrollCtrl.removeListener(_syncGridToKey);
     _hScrollCtrl.dispose();
-    _vScrollCtrl.dispose();
+    _keyVScrollCtrl.dispose();
+    _gridVScrollCtrl.dispose();
     super.dispose();
   }
 
-  double _pitchToY(int pitch) =>
-      (_maxNote - pitch) * _noteRowHeight;
+  double _pitchToY(int pitch) => (_maxNote - pitch) * _noteRowHeight;
 
   int _yToPitch(double y) =>
       (_maxNote - (y / _noteRowHeight).round()).clamp(_minNote, _maxNote);
@@ -97,7 +132,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       ),
       title: Row(
         children: [
-          // Mode toggle
           SegmentedButton<bool>(
             segments: const [
               ButtonSegment(value: false, label: Text('Edit', style: TextStyle(fontSize: 11))),
@@ -113,43 +147,48 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
-          const SizedBox(width: 12),
-          Icon(Icons.piano_outlined, size: 18, color: track.color),
           const SizedBox(width: 8),
-          Text(track.name, style: const TextStyle(fontSize: 14)),
+          Icon(Icons.piano_outlined, size: 18, color: track.color),
+          const SizedBox(width: 6),
+          Text(track.name, style: const TextStyle(fontSize: 13)),
           const Spacer(),
-          // Snap toggle
           _ToolChip(
             icon: settings.snapToGrid ? Icons.grid_on : Icons.grid_off,
             label: settings.snapToGrid ? 'Snap ON' : 'Snap OFF',
             onTap: () => ref.read(settingsProvider.notifier).setSnapToGrid(!settings.snapToGrid),
           ),
-          const SizedBox(width: 8),
-          // Grid resolution
+          const SizedBox(width: 4),
           if (settings.snapToGrid)
             _ToolChip(
               icon: Icons.tune,
               label: '1/${(1 / settings.gridResolution).round()}',
               onTap: _cycleGridResolution,
             ),
-          const SizedBox(width: 16),
-          // Zoom controls
-          _ToolChip(
-            icon: Icons.zoom_in,
-            label: '',
-            onTap: () => setState(() {
-              _pps = (_pps * 1.3).clamp(20, 500);
-              _noteRowHeight = (_noteRowHeight * 1.15).clamp(4, 40);
-            }),
+          const SizedBox(width: 8),
+          // Zoom slider
+          SizedBox(
+            width: 80,
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                activeTrackColor: cs.primary,
+                inactiveTrackColor: cs.outlineVariant,
+                thumbColor: cs.primary,
+              ),
+              child: Slider(
+                value: _zoomLevel,
+                min: 0.5,
+                max: 10.0,
+                onChanged: (v) => setState(() => _zoomLevel = v),
+              ),
+            ),
           ),
-          const SizedBox(width: 4),
-          _ToolChip(
-            icon: Icons.zoom_out,
-            label: '',
-            onTap: () => setState(() {
-              _pps = (_pps / 1.3).clamp(20, 500);
-              _noteRowHeight = (_noteRowHeight / 1.15).clamp(4, 40);
-            }),
+          SizedBox(
+            width: 32,
+            child: Text('${(_zoomLevel * 100).round()}%',
+                style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
           ),
         ],
       ),
@@ -165,13 +204,11 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   Widget _buildBody(BuildContext context, ColorScheme cs, Track track, Project project) {
     return Row(
       children: [
-        // Keyboard column
         SizedBox(
           width: 48,
           child: _buildKeyboard(context, cs),
         ),
         Container(width: 1, color: Theme.of(context).dividerColor.withAlpha(77)),
-        // Grid + notes
         Expanded(child: _buildGridArea(context, cs, track, project)),
       ],
     );
@@ -179,34 +216,31 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
   Widget _buildKeyboard(BuildContext context, ColorScheme cs) {
     final divColor = Theme.of(context).dividerColor;
-    return Scrollbar(
-      controller: _vScrollCtrl,
-      child: SingleChildScrollView(
-        controller: _vScrollCtrl,
-        child: SizedBox(
-          height: _noteCount * _noteRowHeight,
-          child: Column(
-            children: List.generate(_noteCount, (i) {
-              final pitch = _maxNote - i;
-              final isC = pitch % 12 == 0;
-              final isBlack = [1, 3, 6, 8, 10].contains(pitch % 12);
-              return Container(
-                height: _noteRowHeight,
-                decoration: BoxDecoration(
-                  color: isBlack ? Colors.black26 : Colors.transparent,
-                  border: Border(
-                    bottom: BorderSide(color: divColor.withAlpha(38), width: 0.5),
-                  ),
+    return SingleChildScrollView(
+      controller: _keyVScrollCtrl,
+      child: SizedBox(
+        height: _noteCount * _noteRowHeight,
+        child: Column(
+          children: List.generate(_noteCount, (i) {
+            final pitch = _maxNote - i;
+            final isC = pitch % 12 == 0;
+            final isBlack = [1, 3, 6, 8, 10].contains(pitch % 12);
+            return Container(
+              height: _noteRowHeight,
+              decoration: BoxDecoration(
+                color: isBlack ? Colors.black26 : Colors.transparent,
+                border: Border(
+                  bottom: BorderSide(color: divColor.withAlpha(38), width: 0.5),
                 ),
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: 4),
-                child: isC
-                    ? Text('C${(pitch ~/ 12) - 1}',
-                        style: TextStyle(fontSize: 8, color: cs.onSurfaceVariant))
-                    : null,
-              );
-            }),
-          ),
+              ),
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 4),
+              child: isC
+                  ? Text('C${(pitch ~/ 12) - 1}',
+                      style: TextStyle(fontSize: 8, color: cs.onSurfaceVariant))
+                  : null,
+            );
+          }),
         ),
       ),
     );
@@ -226,31 +260,37 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         child: SizedBox(
           width: totalWidth,
           child: Scrollbar(
-            controller: _vScrollCtrl,
+            controller: _gridVScrollCtrl,
             child: SingleChildScrollView(
-              controller: _vScrollCtrl,
-              child: GestureDetector(
-                onTapUp: (details) => _onTapUp(details, track, project),
-                onPanStart: (details) => _onPanStart(details, track, project),
-                onPanUpdate: (details) => _onPanUpdate(details, track, project),
-                onPanEnd: (details) => _onPanEnd(details, track, project),
-                child: CustomPaint(
-                  size: Size(totalWidth, _noteCount * _noteRowHeight),
-                  painter: _PianoRollEditorPainter(
-                    notes: track.notes,
-                    pps: _pps,
-                    noteRowHeight: _noteRowHeight,
-                    minNote: _minNote,
-                    maxNote: _maxNote,
-                    beatSec: beatSec,
-                    timeSigNum: project.timeSignatureNumerator,
-                    gridColor: cs.outlineVariant.withAlpha(77),
-                    beatColor: cs.outlineVariant.withAlpha(128),
-                    barColor: cs.primary.withAlpha(51),
-                    noteColor: track.color,
-                    selectedIndices: _selectedIndices,
-                    dragNoteIndex: _dragNoteIndex,
-                    accentColor: cs.onSurface,
+              controller: _gridVScrollCtrl,
+              child: Listener(
+                onPointerDown: _onPointerDown,
+                onPointerMove: _onPointerMove,
+                onPointerUp: _onPointerUp,
+                behavior: HitTestBehavior.translucent,
+                child: GestureDetector(
+                  onTapUp: (details) => _onTapUp(details, track, project),
+                  onPanStart: (details) => _onPanStart(details, track, project),
+                  onPanUpdate: (details) => _onPanUpdate(details, track, project),
+                  onPanEnd: (details) => _onPanEnd(details, track, project),
+                  child: CustomPaint(
+                    size: Size(totalWidth, _noteCount * _noteRowHeight),
+                    painter: _PianoRollEditorPainter(
+                      notes: track.notes,
+                      pps: _pps,
+                      noteRowHeight: _noteRowHeight,
+                      minNote: _minNote,
+                      maxNote: _maxNote,
+                      beatSec: beatSec,
+                      timeSigNum: project.timeSignatureNumerator,
+                      gridColor: cs.outlineVariant.withAlpha(77),
+                      beatColor: cs.outlineVariant.withAlpha(128),
+                      barColor: cs.primary.withAlpha(51),
+                      noteColor: track.color,
+                      selectedIndices: _selectedIndices,
+                      dragNoteIndex: _dragNoteIndex,
+                      accentColor: cs.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -261,9 +301,61 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     );
   }
 
-  // ─── Gesture handlers ───
+  // ── Viewport pan (middle-mouse / two-finger touch) ──
+
+  void _onPointerDown(PointerDownEvent event) {
+    _activePointers++;
+    if ((event.buttons & 4) != 0) {
+      // Secondary button → initiate pan
+      _startPan(event.localPosition);
+    } else if (_activePointers >= 2) {
+      // Two-finger touch → cancel note drag & start pan
+      if (_dragNoteIndex != null) {
+        setState(() {
+          _dragNoteIndex = null;
+          _isResizing = false;
+          _dragStartX = null;
+          _dragStartY = null;
+          _dragOriginNotes = null;
+        });
+      }
+      _startPan(event.localPosition);
+    }
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (_isPanning && _panStartX != null && _panStartY != null) {
+      final dx = event.localPosition.dx - _panStartX!;
+      final dy = event.localPosition.dy - _panStartY!;
+
+      if (_hScrollCtrl.hasClients) {
+        _hScrollCtrl.jumpTo((_panOffX! - dx).clamp(0, _hScrollCtrl.position.maxScrollExtent));
+      }
+      if (_gridVScrollCtrl.hasClients) {
+        _gridVScrollCtrl.jumpTo((_panOffY! - dy).clamp(0, _gridVScrollCtrl.position.maxScrollExtent));
+      }
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _activePointers = max(0, _activePointers - 1);
+    if (_activePointers < 2) {
+      _isPanning = false;
+    }
+  }
+
+  void _startPan(Offset localPos) {
+    _isPanning = true;
+    _panStartX = localPos.dx;
+    _panStartY = localPos.dy;
+    _panOffX = _hScrollCtrl.hasClients ? _hScrollCtrl.offset : 0;
+    _panOffY = _gridVScrollCtrl.hasClients ? _gridVScrollCtrl.offset : 0;
+  }
+
+  // ── Gesture handlers (note operations) ──
 
   void _onTapUp(TapUpDetails details, Track track, Project project) {
+    if (_isPanning) return;
     final localPos = details.localPosition;
     final idx = _noteIndexAt(localPos, track);
 
@@ -280,28 +372,24 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         setState(() => _selectedIndices.clear());
       }
     } else {
-      // Edit mode
       if (idx != null) {
-        // Tap existing note → delete
         final updated = List<Note>.from(track.notes)..removeAt(idx);
         ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
       } else {
-        // Tap empty space → add note
         _addNoteAt(localPos, track, project);
       }
     }
   }
 
   void _onPanStart(DragStartDetails details, Track track, Project project) {
+    if (_isPanning) return;
     final localPos = details.localPosition;
     final idx = _noteIndexAt(localPos, track);
     if (idx == null) return;
 
-    // Snapshot original notes for absolute-delta computation
     _dragOriginNotes = track.notes.map((n) => n.copyWith()).toList();
 
     if (_isSelectMode) {
-      // Start moving selected notes
       if (!_selectedIndices.contains(idx)) {
         setState(() => _selectedIndices.add(idx));
       }
@@ -310,7 +398,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       _dragStartY = localPos.dy;
       _isResizing = false;
     } else {
-      // Edit mode: check if near right edge for resize
       final n = track.notes[idx];
       final noteRightX = _timeToX(n.startTime + n.duration);
       final edgeThreshold = 8.0;
@@ -319,7 +406,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         _dragStartX = localPos.dx;
         _isResizing = true;
       } else {
-        // Move note
         _dragNoteIndex = idx;
         _dragStartX = localPos.dx;
         _dragStartY = localPos.dy;
@@ -329,22 +415,24 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   }
 
   void _onPanUpdate(DragUpdateDetails details, Track track, Project project) {
-    if (_dragNoteIndex == null || _dragOriginNotes == null) return;
+    if (_isPanning || _dragNoteIndex == null || _dragOriginNotes == null) return;
     final curX = details.localPosition.dx;
     final curY = details.localPosition.dy;
 
     if (_isResizing) {
       final orig = _dragOriginNotes![_dragNoteIndex!];
-      final newDur = _snapTime(max(0.125, orig.duration + _xToTime(curX - (_dragStartX ?? curX))));
+      final rawDelta = (_xToTime(curX) - _xToTime(_dragStartX!));
+      final newDur = max(0.125, _snapTime(orig.duration + rawDelta));
       final updated = List<Note>.from(track.notes);
       updated[_dragNoteIndex!] = orig.copyWith(duration: newDur);
       ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
     } else {
-      // Absolute pitch / time delta from drag start → always rounded to integer pitch
-      final deltaTime = _snapTime(_xToTime(curX)) - _snapTime(_xToTime(_dragStartX ?? curX));
-      final deltaPitch = _yToPitch(curY) - _yToPitch(_dragStartY ?? curY);
+      // Raw (un-snapped) delta → snap only the final result → smooth movement
+      final rawDeltaTime = _xToTime(curX) - _xToTime(_dragStartX!);
+      final rawDeltaPitch = (curY - _dragStartY!) / _noteRowHeight;
+      final deltaPitch = rawDeltaPitch.round();
 
-      if (deltaTime == 0 && deltaPitch == 0) return;
+      if (rawDeltaTime == 0 && deltaPitch == 0) return;
 
       final indices = _isSelectMode ? _selectedIndices.toList() : [_dragNoteIndex!];
       final notes = List<Note>.from(track.notes);
@@ -353,7 +441,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         if (i >= _dragOriginNotes!.length) continue;
         final orig = _dragOriginNotes![i];
         notes[i] = orig.copyWith(
-          startTime: max(0.0, _snapTime(orig.startTime + deltaTime)),
+          startTime: max(0.0, _snapTime(orig.startTime + rawDeltaTime)),
           pitch: (orig.pitch + deltaPitch).clamp(_minNote, _maxNote),
         );
       }
@@ -396,7 +484,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     }
     return null;
   }
-
 }
 
 // ─────────────────── Tool Chip ───────────────────
@@ -474,7 +561,6 @@ class _PianoRollEditorPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..strokeWidth = 0.5;
 
-    // Background fill for C notes (white key indicator)
     for (int p = minNote; p <= maxNote; p++) {
       if (p % 12 == 0) {
         final y = _pitchToY(p);
@@ -485,7 +571,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       }
     }
 
-    // Beat markers (vertical lines)
     final barSec = beatSec * timeSigNum;
     for (double t = 0; t < size.width / pps; t += beatSec) {
       final x = t * pps;
@@ -496,7 +581,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
     }
 
-    // Horizontal grid lines
     paint.strokeWidth = 0.5;
     paint.color = gridColor;
     for (int i = 0; i <= (maxNote - minNote); i++) {
@@ -505,7 +589,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
 
-    // Note blocks
     for (int i = 0; i < notes.length; i++) {
       final n = notes[i];
       if (n.pitch < minNote || n.pitch > maxNote) continue;

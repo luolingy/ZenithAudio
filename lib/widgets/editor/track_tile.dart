@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
 import '../../models/track.dart';
-import '../../models/instrument.dart';
+import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import 'piano_roll_editor.dart';
 

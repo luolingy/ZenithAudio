@@ -1,0 +1,264 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart' hide Track;
+import 'package:path_provider/path_provider.dart';
+import '../models/instrument.dart';
+import '../services/synth_service.dart';
+
+/// Full-screen instrument picker with card grid and preview/audition.
+class InstrumentPickerPage extends StatefulWidget {
+  final String? currentId;
+
+  const InstrumentPickerPage({super.key, this.currentId});
+
+  @override
+  State<InstrumentPickerPage> createState() => _InstrumentPickerPageState();
+}
+
+class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
+  String? _selectedId;
+  String? _previewingId;
+  Player? _previewPlayer;
+  final _synth = SynthService();
+  final Map<String, Uint8List> _previewCache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedId = widget.currentId;
+  }
+
+  @override
+  void dispose() {
+    _stopPreview();
+    super.dispose();
+  }
+
+  Future<void> _preview(String id) async {
+    if (_previewingId == id) {
+      await _stopPreview();
+      return;
+    }
+
+    // Stop any existing preview
+    await _stopPreview();
+
+    final inst = InstrumentPreset.fromId(id);
+    Uint8List wavBytes;
+    if (_previewCache.containsKey(id)) {
+      wavBytes = _previewCache[id]!;
+    } else {
+      wavBytes = _synth.renderPreviewWav(inst, pitch: 72, duration: 0.8, velocity: 100);
+      _previewCache[id] = wavBytes;
+    }
+
+    if (kIsWeb) {
+      await _playPreviewWeb(wavBytes, id);
+    } else {
+      await _playPreviewDesktop(wavBytes, id);
+    }
+  }
+
+  Future<void> _playPreviewDesktop(Uint8List wavBytes, String id) async {
+    final dir = await getTemporaryDirectory();
+    final filePath = '${dir.path}/preview_$id.wav';
+    await File(filePath).writeAsBytes(wavBytes);
+
+    final player = Player();
+    _previewPlayer = player;
+    if (mounted) setState(() => _previewingId = id);
+
+    // Auto-stop on completion
+    player.stream.completed.listen((_) {
+      if (mounted && _previewingId == id) {
+        setState(() => _previewingId = null);
+      }
+      player.dispose();
+      if (_previewPlayer == player) _previewPlayer = null;
+      // Clean up temp file
+      try { File(filePath).delete(); } catch (_) {}
+    });
+
+    await player.open(Media('file://$filePath'), play: true);
+  }
+
+  Future<void> _playPreviewWeb(Uint8List wavBytes, String id) async {
+    setState(() => _previewingId = id);
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (mounted && _previewingId == id) {
+      setState(() => _previewingId = null);
+    }
+  }
+
+  Future<void> _stopPreview() async {
+    await _previewPlayer?.stop();
+    await _previewPlayer?.dispose();
+    _previewPlayer = null;
+    if (mounted) setState(() => _previewingId = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final grouped = <String, List<InstrumentPreset>>{};
+    for (final preset in InstrumentPreset.presets) {
+      grouped.putIfAbsent(_catLabel(preset.category), () => []).add(preset);
+    }
+
+    return Scaffold(
+      backgroundColor: cs.surface,
+      appBar: AppBar(
+        backgroundColor: cs.surface,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Text('Select Instrument'),
+        actions: [
+          if (_selectedId != null)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(_selectedId),
+              child: Text('Done', style: TextStyle(color: cs.primary)),
+            ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        children: [
+          for (final entry in grouped.entries) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 16, bottom: 8),
+              child: Text(
+                entry.key,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: cs.primary,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+            ...entry.value.map((inst) => _InstrumentCard(
+              preset: inst,
+              isSelected: inst.id == _selectedId,
+              isPreviewing: _previewingId == inst.id,
+              onTap: () => setState(() => _selectedId = inst.id),
+              onPreview: () => _preview(inst.id),
+            )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _catLabel(InstrumentCategory cat) {
+    switch (cat) {
+      case InstrumentCategory.keyboard: return 'KEYBOARDS';
+      case InstrumentCategory.string: return 'STRINGS';
+      case InstrumentCategory.wind: return 'BRASS & WIND';
+      case InstrumentCategory.synth: return 'SYNTHS';
+      case InstrumentCategory.percussion: return 'PERCUSSION';
+    }
+  }
+}
+
+class _InstrumentCard extends StatelessWidget {
+  final InstrumentPreset preset;
+  final bool isSelected;
+  final bool isPreviewing;
+  final VoidCallback onTap;
+  final VoidCallback onPreview;
+
+  const _InstrumentCard({
+    required this.preset,
+    required this.isSelected,
+    required this.isPreviewing,
+    required this.onTap,
+    required this.onPreview,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? cs.primaryContainer.withAlpha(100)
+                : cs.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? cs.primary
+                  : cs.outlineVariant.withAlpha(100),
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? cs.primary.withAlpha(30)
+                      : cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  preset.icon,
+                  size: 22,
+                  color: isSelected ? cs.primary : cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      preset.name,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      preset.description,
+                      style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  isPreviewing ? Icons.stop_circle_outlined : Icons.play_circle_outline,
+                  size: 28,
+                  color: cs.primary,
+                ),
+                onPressed: onPreview,
+                tooltip: 'Preview',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

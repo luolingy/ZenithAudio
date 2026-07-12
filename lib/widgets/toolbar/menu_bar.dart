@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
-import '../../models/instrument.dart';
+import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../services/file_service.dart';

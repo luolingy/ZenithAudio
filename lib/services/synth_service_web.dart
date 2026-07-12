@@ -2,15 +2,12 @@ import 'dart:html' as html;
 import 'dart:math';
 import 'dart:typed_data';
 import '../models/note.dart';
+import '../models/instrument.dart';
 import '../core/utils/logger.dart';
 
-/// Synthesizes instrument tracks to WAV blob URLs on web.
 class SynthService {
   static const _sampleRate = 44100;
 
-  /// Generate a WAV blob URL from a list of MIDI [notes].
-  ///
-  /// Returns the blob URL (in `path`) and the total duration in seconds.
   Future<({String path, double duration})> renderToFile({
     required List<Note> notes,
     required String instrumentName,
@@ -20,11 +17,12 @@ class SynthService {
       return (path: '', duration: 0.0);
     }
 
+    final instrument = InstrumentPreset.fromId(instrumentName);
     final totalDuration = _computeDuration(notes);
     final numSamples = (_sampleRate * totalDuration).ceil();
 
     final buffer = Float64List(numSamples);
-    _renderNotes(notes, instrumentName, buffer, numSamples);
+    _renderNotes(notes, instrument, buffer, numSamples);
     _normalize(buffer);
 
     final wavBytes = _encodeWav(buffer, numSamples);
@@ -44,7 +42,7 @@ class SynthService {
     return end + 0.5;
   }
 
-  void _renderNotes(List<Note> notes, String instrumentName, Float64List buffer, int numSamples) {
+  void _renderNotes(List<Note> notes, InstrumentPreset inst, Float64List buffer, int numSamples) {
     for (final note in notes) {
       final startSample = (note.startTime * _sampleRate).round();
       final durSamples = (note.duration * _sampleRate).round();
@@ -52,60 +50,17 @@ class SynthService {
 
       final endSample = (startSample + durSamples).clamp(0, numSamples);
       final freq = _midiToFreq(note.pitch);
-      final velocityFactor = note.velocity / 127.0;
 
       for (int i = startSample; i < endSample; i++) {
         final t = (i - startSample) / _sampleRate;
-        final envelope = _getEnvelope(t, note.duration, instrumentName, note.velocity);
-        final sample = _synthSample(t, freq, instrumentName) * envelope * velocityFactor;
+        final envelope = inst.getEnvelope(t, note.duration, note.velocity);
+        final sample = inst.synthSample(t, freq, note.velocity) * envelope;
         buffer[i] += sample;
       }
     }
   }
 
   double _midiToFreq(int pitch) => 440 * pow(2, (pitch - 69) / 12).toDouble();
-
-  double _getEnvelope(double t, double dur, String instrument, int velocity) {
-    if (instrument == 'piano') {
-      const attack = 0.005;
-      const decay = 0.3;
-      final sustain = 0.3;
-      const release = 0.1;
-      final rStart = dur - release;
-      if (t < attack) return t / attack;
-      if (t < attack + decay) return 1.0 - (1.0 - sustain) * ((t - attack) / decay);
-      if (t < rStart) return sustain;
-      return sustain * (1.0 - (t - rStart) / release);
-    }
-    {
-      const attack = 0.05;
-      const decay = 0.2;
-      final sustain = 0.8;
-      const release = 0.3;
-      final rStart = dur - release;
-      if (t < attack) return t / attack;
-      if (t < attack + decay) return 1.0 - (1.0 - sustain) * ((t - attack) / decay);
-      if (t < rStart) return sustain;
-      return sustain * (1.0 - (t - rStart) / release);
-    }
-  }
-
-  double _synthSample(double t, double freq, String instrument) {
-    if (instrument == 'piano') {
-      double s = 0;
-      for (int h = 1; h <= 6; h++) {
-        final amp = pow(0.6, h - 1).toDouble() * (h == 1 ? 0.8 : 0.3 / h);
-        s += sin(2 * pi * freq * h * t) * amp;
-      }
-      return s;
-    }
-    double s = 0;
-    for (int h = 1; h <= 8; h++) {
-      final amp = (1.0 / h) * pow(0.95, h - 1).toDouble();
-      s += sin(2 * pi * freq * h * t) * amp;
-    }
-    return s;
-  }
 
   void _normalize(Float64List buffer) {
     double maxAmp = 0;
@@ -140,12 +95,35 @@ class SynthService {
     result.writeInt16(16);
     result.writeString('data');
     result.writeInt32(dataSize);
+
     for (int i = 0; i < numSamples; i++) {
       final clamped = buffer[i].clamp(-1.0, 1.0);
       final sample = (clamped * 32767).round().clamp(-32768, 32767);
       result.writeInt16(sample);
     }
+
     return result.bytes;
+  }
+
+  Float64List renderPreview(InstrumentPreset inst, {int pitch = 60, double duration = 1.0, int velocity = 100}) {
+    final numSamples = (_sampleRate * duration).ceil();
+    final buffer = Float64List(numSamples);
+    final freq = _midiToFreq(pitch);
+
+    for (int i = 0; i < numSamples; i++) {
+      final t = i / _sampleRate;
+      final envelope = inst.getEnvelope(t, duration, velocity);
+      final sample = inst.synthSample(t, freq, velocity) * envelope;
+      buffer[i] = sample;
+    }
+
+    _normalize(buffer);
+    return buffer;
+  }
+
+  Uint8List renderPreviewWav(InstrumentPreset inst, {int pitch = 60, double duration = 1.0, int velocity = 100}) {
+    final buffer = renderPreview(inst, pitch: pitch, duration: duration, velocity: velocity);
+    return _encodeWav(buffer, buffer.length);
   }
 }
 
