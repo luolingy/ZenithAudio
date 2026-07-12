@@ -25,6 +25,18 @@ class Note {
     );
   }
 
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Note &&
+          pitch == other.pitch &&
+          startTime == other.startTime &&
+          duration == other.duration &&
+          velocity == other.velocity;
+
+  @override
+  int get hashCode => Object.hash(pitch, startTime, duration, velocity);
+
   Map<String, dynamic> toJson() => {
         'pitch': pitch,
         'startTime': startTime,

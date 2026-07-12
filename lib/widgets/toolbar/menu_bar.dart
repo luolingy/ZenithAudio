@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/theme_colors.dart';
+import '../../models/instrument.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../services/file_service.dart';
@@ -76,10 +77,12 @@ class AudioMenuBar extends ConsumerWidget {
               MenuItem(
                 label: 'menu.edit.undo'.tr(),
                 shortcut: 'shortcut.undo'.tr(),
+                onTap: () => ref.read(projectProvider.notifier).undo(),
               ),
               MenuItem(
                 label: 'menu.edit.redo'.tr(),
                 shortcut: 'shortcut.redo'.tr(),
+                onTap: () => ref.read(projectProvider.notifier).redo(),
               ),
               const MenuItem.separator(),
               MenuItem(label: 'menu.edit.deleteTrack'.tr()),
@@ -115,11 +118,13 @@ class AudioMenuBar extends ConsumerWidget {
               const MenuItem.separator(),
               MenuItem(
                 label: 'menu.track.addInstrument'.tr(),
-                onTap: () {
+                onTap: () async {
+                  final instrument = await showInstrumentPicker(context);
+                  if (instrument == null) return;
                   final trackIndex = ref.read(projectProvider).tracks.length + 1;
                   final name = 'Track $trackIndex';
-                  ref.read(projectProvider.notifier).addInstrumentTrack(name: name);
-                  AppLogger.i('Added instrument track: $name');
+                  ref.read(projectProvider.notifier).addInstrumentTrack(name: name, instrumentName: instrument);
+                  AppLogger.i('Added instrument track: $name ($instrument)');
                 },
               ),
               MenuItem.disabled(

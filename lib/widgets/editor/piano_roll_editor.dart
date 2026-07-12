@@ -28,8 +28,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   double _pps = 80;
   double _noteRowHeight = 10;
 
-  int? _dragNoteIndex;
-
   // Scrolling
   final ScrollController _hScrollCtrl = ScrollController();
   final ScrollController _vScrollCtrl = ScrollController();
@@ -37,6 +35,16 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   static const int _minNote = 12;  // C0
   static const int _maxNote = 108; // C8
   static const int _noteCount = _maxNote - _minNote + 1;
+
+  // ─── Edit / Select mode ───
+  bool _isSelectMode = false;
+  final Set<int> _selectedIndices = {};
+
+  // ─── Drag state ───
+  int? _dragNoteIndex;
+  bool _isResizing = false;
+  double? _dragStartX;
+  double? _dragStartY;
 
   @override
   void dispose() {
@@ -47,8 +55,10 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
   double _pitchToY(int pitch) =>
       (_maxNote - pitch) * _noteRowHeight;
+
   int _yToPitch(double y) =>
       (_maxNote - (y / _noteRowHeight).round()).clamp(_minNote, _maxNote);
+
   double _timeToX(double t) => t * _pps;
   double _xToTime(double x) => x / _pps;
 
@@ -86,10 +96,27 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       ),
       title: Row(
         children: [
+          // Mode toggle
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, label: Text('Edit', style: TextStyle(fontSize: 11))),
+              ButtonSegment(value: true, label: Text('Select', style: TextStyle(fontSize: 11))),
+            ],
+            selected: {_isSelectMode},
+            onSelectionChanged: (v) => setState(() {
+              _isSelectMode = v.first;
+              if (!_isSelectMode) _selectedIndices.clear();
+            }),
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 12),
           Icon(Icons.piano_outlined, size: 18, color: track.color),
           const SizedBox(width: 8),
           Text(track.name, style: const TextStyle(fontSize: 14)),
-          const SizedBox(width: 16),
+          const Spacer(),
           // Snap toggle
           _ToolChip(
             icon: settings.snapToGrid ? Icons.grid_on : Icons.grid_off,
@@ -191,25 +218,15 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         scrollDirection: Axis.horizontal,
         child: SizedBox(
           width: totalWidth,
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (notification) {
-              if (notification is ScrollUpdateNotification) {
-                // Sync keyboard scroll if needed
-              }
-              return false;
-            },
+          child: Scrollbar(
+            controller: _vScrollCtrl,
             child: SingleChildScrollView(
               controller: _vScrollCtrl,
               child: GestureDetector(
-                onDoubleTapDown: (details) {
-                  _addNoteAt(details.localPosition, track, project);
-                },
-                onLongPressStart: (details) {
-                  final idx = _noteIndexAt(details.localPosition, track);
-                  if (idx != null) {
-                    _showDeleteMenu(context, idx);
-                  }
-                },
+                onTapUp: (details) => _onTapUp(details, track, project),
+                onPanStart: (details) => _onPanStart(details, track, project),
+                onPanUpdate: (details) => _onPanUpdate(details, track, project),
+                onPanEnd: (details) => _onPanEnd(details, track, project),
                 child: CustomPaint(
                   size: Size(totalWidth, _noteCount * _noteRowHeight),
                   painter: _PianoRollEditorPainter(
@@ -224,7 +241,8 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                     beatColor: cs.outlineVariant.withAlpha(128),
                     barColor: cs.primary.withAlpha(51),
                     noteColor: track.color,
-                    selectedIndex: _dragNoteIndex,
+                    selectedIndices: _selectedIndices,
+                    dragNoteIndex: _dragNoteIndex,
                     accentColor: cs.onSurface,
                   ),
                 ),
@@ -234,6 +252,132 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         ),
       ),
     );
+  }
+
+  // ─── Gesture handlers ───
+
+  void _onTapUp(TapUpDetails details, Track track, Project project) {
+    final localPos = details.localPosition;
+    final idx = _noteIndexAt(localPos, track);
+
+    if (_isSelectMode) {
+      if (idx != null) {
+        setState(() {
+          if (_selectedIndices.contains(idx)) {
+            _selectedIndices.remove(idx);
+          } else {
+            _selectedIndices.add(idx);
+          }
+        });
+      } else {
+        setState(() => _selectedIndices.clear());
+      }
+    } else {
+      // Edit mode
+      if (idx != null) {
+        // Tap existing note → delete
+        final updated = List<Note>.from(track.notes)..removeAt(idx);
+        ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
+      } else {
+        // Tap empty space → add note
+        _addNoteAt(localPos, track, project);
+      }
+    }
+  }
+
+  void _onPanStart(DragStartDetails details, Track track, Project project) {
+    final localPos = details.localPosition;
+    final idx = _noteIndexAt(localPos, track);
+    if (idx == null) return;
+
+    if (_isSelectMode) {
+      // Start moving selected notes
+      if (!_selectedIndices.contains(idx)) {
+        setState(() => _selectedIndices.add(idx));
+      }
+      _dragNoteIndex = idx;
+      _dragStartX = localPos.dx;
+      _dragStartY = localPos.dy;
+      _isResizing = false;
+    } else {
+      // Edit mode: check if near right edge for resize
+      final n = track.notes[idx];
+      final noteRightX = _timeToX(n.startTime + n.duration);
+      final edgeThreshold = 8.0;
+      if ((localPos.dx - noteRightX).abs() < edgeThreshold) {
+        _dragNoteIndex = idx;
+        _dragStartX = localPos.dx;
+        _isResizing = true;
+      } else {
+        // Move note
+        _dragNoteIndex = idx;
+        _dragStartX = localPos.dx;
+        _dragStartY = localPos.dy;
+        _isResizing = false;
+      }
+    }
+  }
+
+  void _onPanUpdate(DragUpdateDetails details, Track track, Project project) {
+    if (_dragNoteIndex == null) return;
+    final dx = details.localPosition.dx - (_dragStartX ?? details.localPosition.dx);
+    final dy = details.localPosition.dy - (_dragStartY ?? details.localPosition.dy);
+
+    if (_isResizing) {
+      final n = track.notes[_dragNoteIndex!];
+      final newDur = _snapTime(max(0.125, n.duration + _xToTime(dx) - _xToTime(0)));
+      final updated = List<Note>.from(track.notes);
+      updated[_dragNoteIndex!] = n.copyWith(duration: newDur);
+      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
+      _dragStartX = details.localPosition.dx;
+    } else if (_isSelectMode) {
+      // Move all selected notes
+      final deltaTime = _snapTime(_xToTime(dx)) - _snapTime(0);
+      final deltaPitch = _yToPitch(dy) - _yToPitch(0);
+      if (deltaTime == 0 && deltaPitch == 0) return;
+
+      final notes = List<Note>.from(track.notes);
+      final toMove = _selectedIndices.toList();
+      for (final i in toMove) {
+        if (i >= 0 && i < notes.length) {
+          final n = notes[i];
+          notes[i] = n.copyWith(
+            startTime: max(0.0, _snapTime(n.startTime + deltaTime)),
+            pitch: (n.pitch + deltaPitch).clamp(_minNote, _maxNote),
+          );
+        }
+      }
+      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, notes);
+      _dragStartX = details.localPosition.dx;
+      _dragStartY = details.localPosition.dy;
+    } else {
+      // Edit mode: move single note
+      final deltaTime = _snapTime(_xToTime(dx)) - _snapTime(0);
+      final deltaPitch = _yToPitch(dy) - _yToPitch(0);
+      if (deltaTime == 0 && deltaPitch == 0) return;
+
+      final notes = List<Note>.from(track.notes);
+      final i = _dragNoteIndex!;
+      if (i >= 0 && i < notes.length) {
+        final n = notes[i];
+        notes[i] = n.copyWith(
+          startTime: max(0.0, _snapTime(n.startTime + deltaTime)),
+          pitch: (n.pitch + deltaPitch).clamp(_minNote, _maxNote),
+        );
+      }
+      ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, notes);
+      _dragStartX = details.localPosition.dx;
+      _dragStartY = details.localPosition.dy;
+    }
+  }
+
+  void _onPanEnd(DragEndDetails details, Track track, Project project) {
+    setState(() {
+      _dragNoteIndex = null;
+      _isResizing = false;
+      _dragStartX = null;
+      _dragStartY = null;
+    });
   }
 
   void _addNoteAt(Offset localPos, Track track, Project project) {
@@ -262,25 +406,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     return null;
   }
 
-  void _showDeleteMenu(BuildContext context, int noteIndex) {
-    final track = _track;
-    final note = track.notes[noteIndex];
-    showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(100, 100, 200, 200),
-      items: [
-        PopupMenuItem(
-          value: 'delete',
-          child: Text('Delete note (${note.pitch})'),
-        ),
-      ],
-    ).then((value) {
-      if (value == 'delete') {
-        final updated = List<Note>.from(track.notes)..removeAt(noteIndex);
-        ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
-      }
-    });
-  }
 }
 
 // ─────────────────── Tool Chip ───────────────────
@@ -333,7 +458,8 @@ class _PianoRollEditorPainter extends CustomPainter {
   final Color beatColor;
   final Color barColor;
   final Color noteColor;
-  final int? selectedIndex;
+  final Set<int> selectedIndices;
+  final int? dragNoteIndex;
   final Color accentColor;
 
   _PianoRollEditorPainter({
@@ -348,7 +474,8 @@ class _PianoRollEditorPainter extends CustomPainter {
     required this.beatColor,
     required this.barColor,
     required this.noteColor,
-    this.selectedIndex,
+    this.selectedIndices = const {},
+    this.dragNoteIndex,
     required this.accentColor,
   });
 
@@ -382,7 +509,7 @@ class _PianoRollEditorPainter extends CustomPainter {
     paint.strokeWidth = 0.5;
     paint.color = gridColor;
     for (int i = 0; i <= (maxNote - minNote); i++) {
-      if (i % 12 == 0) continue; // already have background
+      if (i % 12 == 0) continue;
       final y = i * noteRowHeight;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
@@ -397,7 +524,7 @@ class _PianoRollEditorPainter extends CustomPainter {
       final y = _pitchToY(n.pitch);
       final h = noteRowHeight - 1;
 
-      final isSelected = i == selectedIndex;
+      final isSelected = selectedIndices.contains(i) || i == dragNoteIndex;
       final color = isSelected ? accentColor : noteColor;
 
       final rrect = RRect.fromRectAndRadius(
@@ -405,7 +532,7 @@ class _PianoRollEditorPainter extends CustomPainter {
         const Radius.circular(2),
       );
       canvas.drawRRect(rrect, Paint()..color = color.withAlpha(180));
-      canvas.drawRRect(rrect, Paint()..style = PaintingStyle.stroke..strokeWidth = 1..color = color);
+      canvas.drawRRect(rrect, Paint()..style = PaintingStyle.stroke..strokeWidth = isSelected ? 2 : 1..color = color);
     }
   }
 
@@ -416,5 +543,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       oldDelegate.notes != notes ||
       oldDelegate.pps != pps ||
       oldDelegate.noteRowHeight != noteRowHeight ||
-      oldDelegate.selectedIndex != selectedIndex;
+      oldDelegate.selectedIndices != selectedIndices ||
+      oldDelegate.dragNoteIndex != dragNoteIndex;
 }

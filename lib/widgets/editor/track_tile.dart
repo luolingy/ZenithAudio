@@ -227,36 +227,12 @@ class TrackTile extends ConsumerWidget {
     }
   }
 
-  void _showChangeInstrumentDialog(BuildContext context, WidgetRef ref) {
+  Future<void> _showChangeInstrumentDialog(BuildContext context, WidgetRef ref) async {
     final current = track.instrumentName ?? 'piano';
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('更换乐器'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final preset in InstrumentPreset.presets)
-              RadioListTile<String>(
-                title: Text(preset.name),
-                value: preset.type.name,
-                groupValue: current,
-                onChanged: (v) {
-                  if (v != null) {
-                    ref.read(projectProvider.notifier).setTrackInstrument(track.id, v);
-                    Navigator.of(ctx).pop();
-                  }
-                },
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('取消')),
-        ],
-      ),
-    );
+    final instrument = await showInstrumentPicker(context, current: current);
+    if (instrument != null) {
+      ref.read(projectProvider.notifier).setTrackInstrument(track.id, instrument);
+    }
   }
 
   void _showPropertiesDialog(BuildContext context) {

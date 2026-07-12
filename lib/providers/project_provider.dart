@@ -20,9 +20,13 @@ final projectProvider = NotifierProvider<ProjectNotifier, Project>(
 
 class ProjectNotifier extends Notifier<Project> {
   static const _uuid = Uuid();
+  static const int _maxUndo = 50;
 
   /// Current save path for the project (set after first save or open).
   String? _currentFilePath;
+
+  final List<Project> _undoStack = [];
+  final List<Project> _redoStack = [];
 
   @override
   Project build() {
@@ -30,6 +34,45 @@ class ProjectNotifier extends Notifier<Project> {
       ref.read(audioServiceProvider).dispose();
     });
     return Project(id: _uuid.v4(), name: 'untitled');
+  }
+
+  bool get canUndo => _undoStack.isNotEmpty;
+  bool get canRedo => _redoStack.isNotEmpty;
+
+  Project _deepClone(Project p) {
+    return Project(
+      id: p.id,
+      name: p.name,
+      tracks: p.tracks.map((t) => t.copyWith(
+        notes: t.notes.map((n) => n.copyWith()).toList(),
+      )).toList(),
+      sampleRate: p.sampleRate,
+      timeSignatureNumerator: p.timeSignatureNumerator,
+      timeSignatureDenominator: p.timeSignatureDenominator,
+      keySignature: p.keySignature,
+      bpm: p.bpm,
+      playbackSpeed: p.playbackSpeed,
+    );
+  }
+
+  void _pushUndo() {
+    _undoStack.add(_deepClone(state));
+    if (_undoStack.length > _maxUndo) _undoStack.removeAt(0);
+    _redoStack.clear();
+  }
+
+  void undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_deepClone(state));
+    state = _undoStack.removeLast();
+    AppLogger.i('Undo');
+  }
+
+  void redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_deepClone(state));
+    state = _redoStack.removeLast();
+    AppLogger.i('Redo');
   }
 
   // ──── Save / Open ────
@@ -72,6 +115,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   Future<void> openProject() async {
+    _pushUndo();
     try {
       AppLogger.i('Opening project...');
 
@@ -135,6 +179,7 @@ class ProjectNotifier extends Notifier<Project> {
   // ──── Track management ────
 
   void addAudioTrack({String? name, String? audioFilePath}) {
+    _pushUndo();
     final trackColors = _trackColors();
     final track = Track(
       id: _uuid.v4(),
@@ -159,6 +204,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void addInstrumentTrack({String? name, String? instrumentName}) {
+    _pushUndo();
     final trackColors = _trackColors();
     final track = Track(
       id: _uuid.v4(),
@@ -214,6 +260,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   Future<void> removeTrack(String trackId) async {
+    _pushUndo();
     await ref.read(audioServiceProvider).unloadTrack(trackId);
     final removedName = state.tracks.firstWhere((t) => t.id == trackId).name;
     state = state.copyWith(
@@ -281,6 +328,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void renameTrack(String trackId, String newName) {
+    _pushUndo();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(name: newName);
@@ -290,6 +338,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void updateTrackNotes(String trackId, List<Note> notes) {
+    _pushUndo();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(notes: notes);
@@ -302,6 +351,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void setTrackInstrument(String trackId, String instrumentName) {
+    _pushUndo();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(instrumentName: instrumentName);
@@ -313,6 +363,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void setTimeSignature(int numerator, int denominator) {
+    _pushUndo();
     state = state.copyWith(
       timeSignatureNumerator: numerator,
       timeSignatureDenominator: denominator,
@@ -321,22 +372,26 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void setKeySignature(String key) {
+    _pushUndo();
     state = state.copyWith(keySignature: key);
     AppLogger.i('Key signature: $key');
   }
 
   void setBpm(double bpm) {
+    _pushUndo();
     state = state.copyWith(bpm: bpm.clamp(20, 300));
     AppLogger.i('BPM: ${bpm.toStringAsFixed(1)}');
   }
 
   void setPlaybackSpeed(double speed) {
+    _pushUndo();
     state = state.copyWith(playbackSpeed: speed.clamp(0.25, 4.0));
     ref.read(audioServiceProvider).setPlaybackSpeed(speed.clamp(0.25, 4.0));
     AppLogger.i('Playback speed: ${speed.toStringAsFixed(2)}x');
   }
 
   Future<void> newProject() async {
+    _pushUndo();
     await ref.read(audioServiceProvider).unloadAll();
     _currentFilePath = null;
     state = Project(id: _uuid.v4(), name: 'Untitled');

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
+import '../../models/instrument.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../core/utils/logger.dart';
@@ -51,10 +52,12 @@ class AudioToolBar extends ConsumerWidget {
           _ToolButton(
             icon: Icons.undo_outlined,
             tooltip: 'toolbar.undo'.tr(),
+            onTap: () => ref.read(projectProvider.notifier).undo(),
           ),
           _ToolButton(
             icon: Icons.redo_outlined,
             tooltip: 'toolbar.redo'.tr(),
+            onTap: () => ref.read(projectProvider.notifier).redo(),
           ),
           const _ToolDivider(),
           _ToolButton(
@@ -83,11 +86,13 @@ class AudioToolBar extends ConsumerWidget {
           _ToolButton(
             icon: Icons.piano_outlined,
             tooltip: 'toolbar.addInstrumentTrack'.tr(),
-            onTap: () {
+            onTap: () async {
+              final instrument = await showInstrumentPicker(context);
+              if (instrument == null) return;
               final trackIndex = ref.read(projectProvider).tracks.length + 1;
               final name = 'Track $trackIndex';
-              ref.read(projectProvider.notifier).addInstrumentTrack(name: name);
-              AppLogger.i('Added instrument track: $name');
+              ref.read(projectProvider.notifier).addInstrumentTrack(name: name, instrumentName: instrument);
+              AppLogger.i('Added instrument track: $name ($instrument)');
             },
           ),
           _ToolButton(
@@ -95,25 +100,8 @@ class AudioToolBar extends ConsumerWidget {
             tooltip: 'toolbar.deleteTrack'.tr(),
           ),
           const Spacer(),
-          // Time signature
-          _ProjectSetting(
-            child: _TimeSigControl(),
-          ),
-          const _ToolDivider(),
-          // Key signature
-          _ProjectSetting(
-            child: _KeySigControl(),
-          ),
-          const _ToolDivider(),
-          // BPM
-          _ProjectSetting(
-            child: _BpmSlider(),
-          ),
-          const _ToolDivider(),
-          // Playback speed
-          _ProjectSetting(
-            child: _SpeedControl(),
-          ),
+          // Project settings (time sig, key sig, BPM, speed)
+          _ProjectSettingsButton(),
           const _ToolDivider(),
           _ToolButton(
             icon: Icons.zoom_in_outlined,
@@ -190,157 +178,118 @@ class _ToolDivider extends StatelessWidget {
   }
 }
 
-/// Wrapper that styles a project setting widget (compact label + control).
-class _ProjectSetting extends StatelessWidget {
-  final Widget child;
-  const _ProjectSetting({required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: child,
-    );
-  }
-}
-
-/// Time signature cycle button.
-class _TimeSigControl extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(projectProvider);
-    final num = project.timeSignatureNumerator;
-    final den = project.timeSignatureDenominator;
-    return GestureDetector(
-      onTap: () {
-        // Cycle through common time sigs
-        const next = {
-          4: (3, 4), 3: (6, 8), 6: (2, 4), 2: (4, 4),
-        };
-        final pair = next[num] ?? (4, 4);
-        ref.read(projectProvider.notifier).setTimeSignature(pair.$1, pair.$2);
-      },
-      child: Tooltip(
-        message: 'Time signature',
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.timer_outlined, size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            const SizedBox(width: 3),
-            Text('$num/$den',
-                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Key signature cycle button.
-class _KeySigControl extends ConsumerWidget {
+/// Consolidated project settings popup button (time sig, key sig, BPM, speed).
+class _ProjectSettingsButton extends ConsumerWidget {
   static const _keys = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(projectProvider);
-    final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: () {
-        final current = _keys.indexOf(project.keySignature);
-        final next = _keys[(current + 1) % _keys.length];
-        ref.read(projectProvider.notifier).setKeySignature(next);
-      },
-      child: Tooltip(
-        message: 'Key signature',
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.music_note_outlined, size: 12, color: cs.onSurfaceVariant),
-            const SizedBox(width: 3),
-            Text(project.keySignature,
-                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-          ],
-        ),
-      ),
+    return _ToolButton(
+      icon: Icons.tune_outlined,
+      tooltip: 'Project Settings',
+      onTap: () => _showSettingsDialog(context, ref),
     );
   }
-}
 
-/// Compact BPM slider.
-class _BpmSlider extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(projectProvider);
+  void _showSettingsDialog(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: 'Tempo (BPM)',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('${project.bpm.round()}',
-              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
-          const SizedBox(width: 4),
-          SizedBox(
-            width: 60,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 2,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
-              ),
-              child: Slider(
-                value: project.bpm,
-                min: 20,
-                max: 300,
-                onChanged: (v) => ref.read(projectProvider.notifier).setBpm(v),
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final proj = ref.watch(projectProvider);
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.tune, size: 18),
+                const SizedBox(width: 8),
+                const Text('Project Settings'),
+              ],
+            ),
+            content: SizedBox(
+              width: 320,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Time Signature ──
+                    Text('Time Signature', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                    const SizedBox(height: 4),
+                    DropdownButton<String>(
+                      value: '${proj.timeSignatureNumerator}/${proj.timeSignatureDenominator}',
+                      isExpanded: true,
+                      items: ['2/4', '3/4', '4/4', '5/4', '6/8']
+                          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        final parts = v.split('/');
+                        ref.read(projectProvider.notifier)
+                            .setTimeSignature(int.parse(parts[0]), int.parse(parts[1]));
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // ── Key Signature ──
+                    Text('Key Signature', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                    const SizedBox(height: 4),
+                    DropdownButton<String>(
+                      value: proj.keySignature,
+                      isExpanded: true,
+                      items: _keys.map((k) => DropdownMenuItem(value: k, child: Text(k))).toList(),
+                      onChanged: (v) {
+                        if (v != null) ref.read(projectProvider.notifier).setKeySignature(v);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // ── BPM ──
+                    Row(
+                      children: [
+                        Text('BPM', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                        const Spacer(),
+                        Text('${proj.bpm.round()}',
+                            style: TextStyle(fontSize: 12, color: cs.onSurface)),
+                      ],
+                    ),
+                    Slider(
+                      value: proj.bpm,
+                      min: 20,
+                      max: 300,
+                      onChanged: (v) => ref.read(projectProvider.notifier).setBpm(v),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // ── Playback Speed ──
+                    Row(
+                      children: [
+                        Text('Speed', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                        const Spacer(),
+                        Text('${proj.playbackSpeed.toStringAsFixed(2)}x',
+                            style: TextStyle(fontSize: 12, color: cs.onSurface)),
+                      ],
+                    ),
+                    Slider(
+                      value: proj.playbackSpeed,
+                      min: 0.25,
+                      max: 4.0,
+                      divisions: 15,
+                      onChanged: (v) =>
+                          ref.read(projectProvider.notifier).setPlaybackSpeed(v),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Playback speed control.
-class _SpeedControl extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(projectProvider);
-    final cs = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: 'Playback speed',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('${project.playbackSpeed.toStringAsFixed(2)}x',
-              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
-          const SizedBox(width: 4),
-          SizedBox(
-            width: 50,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 2,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text('Close'),
               ),
-              child: Slider(
-                value: project.playbackSpeed,
-                min: 0.25,
-                max: 4.0,
-                divisions: 15,
-                onChanged: (v) =>
-                    ref.read(projectProvider.notifier).setPlaybackSpeed(v),
-              ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
