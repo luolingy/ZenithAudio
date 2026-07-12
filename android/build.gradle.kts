@@ -21,8 +21,8 @@ subprojects {
 subprojects {
     afterEvaluate {
         val androidExt = project.extensions.findByName("android") ?: return@afterEvaluate
-        if (androidExt is com.android.build.api.dsl.CommonExtension<*, *, *>) {
-            androidExt.compileSdk.set(36)
+        if (androidExt is com.android.build.api.dsl.CommonExtension) {
+            androidExt.compileSdk = 36
         }
     }
 }
