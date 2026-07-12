@@ -65,6 +65,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  fonts:
+    - family: Plangothic
+      fonts:
+        - asset: assets/fonts/Plangothic.ttc
+
   assets:
     - assets/translations/
   #   - images/a_dot_ham.jpeg

@@ -52,6 +52,7 @@ class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'Plangothic',
       colorScheme: cs,
       scaffoldBackgroundColor: cs.surface,
       appBarTheme: AppBarTheme(

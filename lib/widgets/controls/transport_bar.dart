@@ -120,7 +120,6 @@ class TransportBar extends ConsumerWidget {
                     style: TextStyle(
                       color: Colors.red.shade300,
                       fontSize: 13,
-                      fontFamily: 'monospace',
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -139,7 +138,6 @@ class TransportBar extends ConsumerWidget {
               style: TextStyle(
                 color: cs.primary,
                 fontSize: 13,
-                fontFamily: 'monospace',
                 fontWeight: FontWeight.w500,
               ),
             ),
