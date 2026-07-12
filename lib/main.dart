@@ -18,8 +18,6 @@ void main() async {
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
   ]);
 
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
