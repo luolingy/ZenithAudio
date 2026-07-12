@@ -32,8 +32,8 @@ class AudioMenuBar extends ConsumerWidget {
               MenuItem(
                 label: 'menu.file.newProject'.tr(),
                 shortcut: 'shortcut.newProject'.tr(),
-                onTap: () {
-                  ref.read(projectProvider.notifier).newProject();
+                onTap: () async {
+                  await ref.read(projectProvider.notifier).newProject();
                   AppLogger.i('New project created');
                 },
               ),

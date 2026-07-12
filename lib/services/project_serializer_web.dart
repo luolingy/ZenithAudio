@@ -158,6 +158,11 @@ class ProjectSerializer {
       'version': AppConstants.projectFormatVersion,
       'name': project.name,
       'sampleRate': project.sampleRate,
+      'timeSignatureNumerator': project.timeSignatureNumerator,
+      'timeSignatureDenominator': project.timeSignatureDenominator,
+      'keySignature': project.keySignature,
+      'bpm': project.bpm,
+      'playbackSpeed': project.playbackSpeed,
       'tracks': tracksJson,
     };
   }
@@ -197,7 +202,17 @@ class ProjectSerializer {
       );
     }).toList();
 
-    return Project(id: '', name: name, tracks: tracks, sampleRate: sampleRate);
+    return Project(
+      id: '',
+      name: name,
+      tracks: tracks,
+      sampleRate: sampleRate,
+      timeSignatureNumerator: info['timeSignatureNumerator'] as int? ?? 4,
+      timeSignatureDenominator: info['timeSignatureDenominator'] as int? ?? 4,
+      keySignature: info['keySignature'] as String? ?? 'C',
+      bpm: (info['bpm'] as num?)?.toDouble() ?? 120,
+      playbackSpeed: (info['playbackSpeed'] as num?)?.toDouble() ?? 1.0,
+    );
   }
 
   Color _parseColor(String? hex) {

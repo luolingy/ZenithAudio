@@ -74,6 +74,12 @@ class AudioService {
     }
   }
 
+  void setPlaybackSpeed(double speed) {
+    for (final p in _players.values) {
+      p.element.playbackRate = speed;
+    }
+  }
+
   void updateMasterVolume(double volume) {
     _masterVolume = volume.clamp(0.0, 1.0);
     for (final p in _players.values) {

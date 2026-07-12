@@ -5,6 +5,7 @@ import '../../core/utils/theme_colors.dart';
 import '../../models/track.dart';
 import '../../models/instrument.dart';
 import '../../providers/project_provider.dart';
+import 'piano_roll_editor.dart';
 
 String _formatDuration(double sec) {
   final m = (sec ~/ 60).toString().padLeft(2, '0');
@@ -169,6 +170,7 @@ class TrackTile extends ConsumerWidget {
       const PopupMenuItem(value: 'properties', child: Text('属性')),
     ];
     if (track.type == TrackType.instrument) {
+      items.add(const PopupMenuItem(value: 'editPianoRoll', child: Text('编辑钢琴卷帘')));
       items.add(const PopupMenuItem(value: 'changeInstrument', child: Text('更换乐器')));
     }
     items.add(const PopupMenuItem(value: 'delete', child: Text('删除')));
@@ -184,6 +186,12 @@ class TrackTile extends ConsumerWidget {
           _showRenameDialog(context, ref);
         case 'properties':
           _showPropertiesDialog(context);
+        case 'editPianoRoll':
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PianoRollEditor(trackId: track.id),
+            ),
+          );
         case 'changeInstrument':
           _showChangeInstrumentDialog(context, ref);
         case 'delete':

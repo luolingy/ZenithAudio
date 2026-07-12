@@ -27,7 +27,7 @@ class ProjectNotifier extends Notifier<Project> {
   @override
   Project build() {
     ref.onDispose(() {
-      ref.read(audioServiceProvider).unloadAll();
+      ref.read(audioServiceProvider).dispose();
     });
     return Project(id: _uuid.v4(), name: 'untitled');
   }
@@ -102,7 +102,7 @@ class ProjectNotifier extends Notifier<Project> {
       }
 
       final audioService = ref.read(audioServiceProvider);
-      audioService.unloadAll();
+      await audioService.unloadAll();
 
       final updatedTracks = serialized.project.tracks.map((t) {
         if (t.type == TrackType.audio) {
@@ -213,8 +213,8 @@ class ProjectNotifier extends Notifier<Project> {
     }
   }
 
-  void removeTrack(String trackId) {
-    ref.read(audioServiceProvider).unloadTrack(trackId);
+  Future<void> removeTrack(String trackId) async {
+    await ref.read(audioServiceProvider).unloadTrack(trackId);
     final removedName = state.tracks.firstWhere((t) => t.id == trackId).name;
     state = state.copyWith(
       tracks: state.tracks.where((t) => t.id != trackId).toList(),
@@ -312,8 +312,32 @@ class ProjectNotifier extends Notifier<Project> {
     _renderAndLoadInstrument(track);
   }
 
-  void newProject() {
-    ref.read(audioServiceProvider).unloadAll();
+  void setTimeSignature(int numerator, int denominator) {
+    state = state.copyWith(
+      timeSignatureNumerator: numerator,
+      timeSignatureDenominator: denominator,
+    );
+    AppLogger.i('Time signature: $numerator/$denominator');
+  }
+
+  void setKeySignature(String key) {
+    state = state.copyWith(keySignature: key);
+    AppLogger.i('Key signature: $key');
+  }
+
+  void setBpm(double bpm) {
+    state = state.copyWith(bpm: bpm.clamp(20, 300));
+    AppLogger.i('BPM: ${bpm.toStringAsFixed(1)}');
+  }
+
+  void setPlaybackSpeed(double speed) {
+    state = state.copyWith(playbackSpeed: speed.clamp(0.25, 4.0));
+    ref.read(audioServiceProvider).setPlaybackSpeed(speed.clamp(0.25, 4.0));
+    AppLogger.i('Playback speed: ${speed.toStringAsFixed(2)}x');
+  }
+
+  Future<void> newProject() async {
+    await ref.read(audioServiceProvider).unloadAll();
     _currentFilePath = null;
     state = Project(id: _uuid.v4(), name: 'Untitled');
     AppLogger.i('New project created');

@@ -95,6 +95,26 @@ class AudioToolBar extends ConsumerWidget {
             tooltip: 'toolbar.deleteTrack'.tr(),
           ),
           const Spacer(),
+          // Time signature
+          _ProjectSetting(
+            child: _TimeSigControl(),
+          ),
+          const _ToolDivider(),
+          // Key signature
+          _ProjectSetting(
+            child: _KeySigControl(),
+          ),
+          const _ToolDivider(),
+          // BPM
+          _ProjectSetting(
+            child: _BpmSlider(),
+          ),
+          const _ToolDivider(),
+          // Playback speed
+          _ProjectSetting(
+            child: _SpeedControl(),
+          ),
+          const _ToolDivider(),
           _ToolButton(
             icon: Icons.zoom_in_outlined,
             tooltip: 'toolbar.zoomIn'.tr(),
@@ -166,6 +186,162 @@ class _ToolDivider extends StatelessWidget {
       height: 24,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       color: Theme.of(context).dividerColor,
+    );
+  }
+}
+
+/// Wrapper that styles a project setting widget (compact label + control).
+class _ProjectSetting extends StatelessWidget {
+  final Widget child;
+  const _ProjectSetting({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Time signature cycle button.
+class _TimeSigControl extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = ref.watch(projectProvider);
+    final num = project.timeSignatureNumerator;
+    final den = project.timeSignatureDenominator;
+    return GestureDetector(
+      onTap: () {
+        // Cycle through common time sigs
+        const next = {
+          4: (3, 4), 3: (6, 8), 6: (2, 4), 2: (4, 4),
+        };
+        final pair = next[num] ?? (4, 4);
+        ref.read(projectProvider.notifier).setTimeSignature(pair.$1, pair.$2);
+      },
+      child: Tooltip(
+        message: 'Time signature',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.timer_outlined, size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(width: 3),
+            Text('$num/$den',
+                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Key signature cycle button.
+class _KeySigControl extends ConsumerWidget {
+  static const _keys = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = ref.watch(projectProvider);
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () {
+        final current = _keys.indexOf(project.keySignature);
+        final next = _keys[(current + 1) % _keys.length];
+        ref.read(projectProvider.notifier).setKeySignature(next);
+      },
+      child: Tooltip(
+        message: 'Key signature',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.music_note_outlined, size: 12, color: cs.onSurfaceVariant),
+            const SizedBox(width: 3),
+            Text(project.keySignature,
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact BPM slider.
+class _BpmSlider extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = ref.watch(projectProvider);
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'Tempo (BPM)',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('${project.bpm.round()}',
+              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 60,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+              ),
+              child: Slider(
+                value: project.bpm,
+                min: 20,
+                max: 300,
+                onChanged: (v) => ref.read(projectProvider.notifier).setBpm(v),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Playback speed control.
+class _SpeedControl extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = ref.watch(projectProvider);
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'Playback speed',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('${project.playbackSpeed.toStringAsFixed(2)}x',
+              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 50,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+              ),
+              child: Slider(
+                value: project.playbackSpeed,
+                min: 0.25,
+                max: 4.0,
+                divisions: 15,
+                onChanged: (v) =>
+                    ref.read(projectProvider.notifier).setPlaybackSpeed(v),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

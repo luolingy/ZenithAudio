@@ -15,6 +15,7 @@ import 'timeline_ruler.dart';
 import 'track_panel.dart';
 import 'waveform_view.dart';
 import 'piano_roll_track.dart';
+import 'piano_roll_editor.dart';
 import '../../models/track.dart';
 
 class AudioEditor extends ConsumerStatefulWidget {
@@ -225,15 +226,19 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                               itemExtent: AppConstants.trackTileHeight,
                                               itemBuilder: (context, index) {
                                                 final tr = project.tracks[index];
-                                                if (tr.type == TrackType.instrument) {
-                                                  return PianoRollTrack(
-                                                    track: tr,
-                                                    pixelsPerSecond: pps,
-                                                    onNotesChanged: (notes) =>
-                                                        ref.read(projectProvider.notifier)
-                                                            .updateTrackNotes(tr.id, notes),
-                                                  );
-                                                }
+                                                  if (tr.type == TrackType.instrument) {
+                                                    return PianoRollTrack(
+                                                      track: tr,
+                                                      pixelsPerSecond: pps,
+                                                      onEdit: () => Navigator.of(context).push(
+                                                        MaterialPageRoute(
+                                                          builder: (_) => PianoRollEditor(
+                                                            trackId: tr.id,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
                                                 return WaveformView(
                                                   track: tr,
                                                   pixelsPerSecond: pps,
