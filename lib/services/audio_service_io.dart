@@ -1,7 +1,13 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
+import 'dart:math';
+import 'dart:typed_data';
 import 'package:media_kit/media_kit.dart' hide Track;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/track.dart';
+import '../models/instrument.dart';
 import '../core/utils/logger.dart';
 
 final audioServiceProvider = Provider<AudioService>((ref) {
@@ -16,31 +22,34 @@ class _TrackPlayer {
   StreamSubscription? positionSub;
   StreamSubscription? durationSub;
   bool _disposed = false;
+  double trackVolume = 1.0;
 
   _TrackPlayer(this.player);
 
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-
-    // Cancel Dart subscriptions (fire-and-forget; isolate teardown is imminent)
     completedSub?.cancel();
     positionSub?.cancel();
     durationSub?.cancel();
     completedSub = null;
     positionSub = null;
     durationSub = null;
-
-    // Stop playback and release native resources synchronously.
-    // This ensures media_kit's NativeReferenceHolder removes its entries
-    // BEFORE the Dart isolate is torn down by hot restart.
     player.stop();
     player.dispose();
   }
 }
 
+/// Tracks which instrument WAVs are cached and their note hash.
+class _WavCache {
+  final String path;
+  final int noteHash;
+  _WavCache(this.path, this.noteHash);
+}
+
 class AudioService {
   final Map<String, _TrackPlayer> _players = {};
+  final Map<String, _WavCache> _wavCache = {};
   bool _isPlaying = false;
   double _masterVolume = 1.0;
 
@@ -48,13 +57,12 @@ class AudioService {
   void Function()? onCompleted;
 
   bool get isPlaying => _isPlaying;
-
   double get masterVolume => _masterVolume;
 
   set masterVolume(double v) {
     _masterVolume = v.clamp(0.0, 1.0);
     for (final tp in _players.values) {
-      tp.player.setVolume((_masterVolume * 100).roundToDouble());
+      tp.player.setVolume((tp.trackVolume * _masterVolume * 100).roundToDouble());
     }
   }
 
@@ -74,6 +82,7 @@ class AudioService {
       await player.setVolume(vol);
 
       _players[track.id] = tp;
+      tp.trackVolume = track.volume;
 
       tp.completedSub = player.stream.completed.listen((completed) {
         if (tp._disposed) return;
@@ -113,9 +122,169 @@ class AudioService {
     }
   }
 
+  /// Get or generate a WAV for an instrument track. Returns the file path.
+  /// Returns null if track has no instrument or no notes.
+  /// If [useIsolate] is true, synthesis runs on a background isolate.
+  Future<String?> prepareInstrumentTrack(Track track,
+      {bool useIsolate = false}) async {
+    if (track.type == TrackType.audio) return track.audioFilePath;
+    if (track.instrumentName == null || track.notes.isEmpty) return null;
+
+    final noteHash = Object.hash(track.instrumentName, Object.hashAll(track.notes));
+    final cached = _wavCache[track.id];
+    if (cached != null && cached.noteHash == noteHash) {
+      return cached.path;
+    }
+
+    const maxDur = 120.0;
+    final dur = track.computedDuration > 0
+        ? (track.computedDuration + 0.5).clamp(0, maxDur)
+        : 2.0;
+    final sampleRate = 44100;
+
+    final Uint8List wav;
+    if (useIsolate) {
+      final params = <String, dynamic>{
+        'notes': track.notes.map((n) => {
+          'startTime': n.startTime,
+          'duration': n.duration,
+          'pitch': n.pitch,
+          'velocity': n.velocity,
+        }).toList(),
+        'instrumentName': track.instrumentName,
+        'duration': dur,
+        'sampleRate': sampleRate,
+      };
+      wav = await Isolate.run(() => _synthAndEncodeWav(params));
+    } else {
+      wav = _synthAndEncodeWav(<String, dynamic>{
+        'notes': track.notes.map((n) => {
+          'startTime': n.startTime,
+          'duration': n.duration,
+          'pitch': n.pitch,
+          'velocity': n.velocity,
+        }).toList(),
+        'instrumentName': track.instrumentName,
+        'duration': dur,
+        'sampleRate': sampleRate,
+      });
+    }
+
+    final dir = await getTemporaryDirectory();
+    final filePath = '${dir.path}/synth_${track.id}.wav';
+    await File(filePath).writeAsBytes(wav);
+
+    _wavCache[track.id] = _WavCache(filePath, noteHash);
+    return filePath;
+  }
+
+  /// Prepare all given tracks (generate WAVs for instrument tracks if needed).
+  /// Returns a stream of progress (0.0 – 1.0).
+  Stream<double> prepareTracks(List<Track> tracks,
+      {String? skipTrackId, bool useIsolate = false}) async* {
+    final targets = tracks.where((t) =>
+        t.type == TrackType.instrument &&
+        t.id != skipTrackId &&
+        t.instrumentName != null &&
+        t.notes.isNotEmpty);
+
+    int done = 0;
+    final total = targets.length;
+    if (total == 0) {
+      yield 1.0;
+      return;
+    }
+
+    for (final track in targets) {
+      await prepareInstrumentTrack(track, useIsolate: useIsolate);
+      done++;
+      yield done / total;
+    }
+  }
+
+  /// Load all given tracks into players and volume them according to
+  /// their settings and master volume.
+  Future<void> loadTracks(List<Track> tracks, {String? skipTrackId}) async {
+    await unloadAll();
+    for (final track in tracks) {
+      if (track.id == skipTrackId) continue;
+      final path = track.type == TrackType.audio
+          ? track.audioFilePath
+          : _wavCache[track.id]?.path;
+      if (path == null || path.isEmpty) continue;
+      if (!File(path).existsSync()) continue;
+
+      final player = Player();
+      final tp = _TrackPlayer(player);
+      try {
+        await player.open(Media(Uri.file(path).toString()), play: false);
+        final vol = (track.volume * _masterVolume * 100).roundToDouble();
+        await player.setVolume(track.isMuted ? 0 : vol);
+        _players[track.id] = tp;
+        tp.trackVolume = track.volume;
+      } catch (e) {
+        tp.dispose();
+      }
+    }
+  }
+
+  /// Load a single track from a file path with given volume/mute.
+  Future<void> loadTrackFromPath(String trackId, String path,
+      {double volume = 1.0, bool muted = false}) async {
+    await unloadTrack(trackId);
+    final player = Player();
+    final tp = _TrackPlayer(player);
+    try {
+      await player.open(Media(Uri.file(path).toString()), play: false);
+      await player.setVolume(muted ? 0 : (volume * _masterVolume * 100).roundToDouble());
+      _players[trackId] = tp;
+      tp.trackVolume = volume;
+
+      tp.completedSub = player.stream.completed.listen((completed) {
+        if (tp._disposed) return;
+        if (completed) {
+          _isPlaying = false;
+          onCompleted?.call();
+        }
+      });
+
+      tp.positionSub = player.stream.position.listen((position) {
+        if (tp._disposed) return;
+        final now = DateTime.now();
+        if (now.difference(_lastPositionUpdate) < _positionThrottle) return;
+        _lastPositionUpdate = now;
+        onPositionChanged?.call(position.inMilliseconds / 1000.0);
+      });
+    } catch (e) {
+      tp.dispose();
+    }
+  }
+
+  /// Returns the cached WAV path for a track, or null if not cached.
+  String? getCachedTrackPath(String trackId) => _wavCache[trackId]?.path;
+
+  /// Check if track WAV is cached with current notes.
+  bool isTrackCached(Track track) {
+    if (track.type == TrackType.audio) return track.audioFilePath != null;
+    final cached = _wavCache[track.id];
+    if (cached == null) return false;
+    final noteHash = Object.hash(track.instrumentName, Object.hashAll(track.notes));
+    return cached.noteHash == noteHash;
+  }
+
   void updateTrackVolume(String trackId, double volume) {
     final tp = _players[trackId];
-    tp?.player.setVolume((volume * _masterVolume * 100).roundToDouble());
+    if (tp != null) {
+      tp.trackVolume = volume;
+      tp.player.setVolume((volume * _masterVolume * 100).roundToDouble());
+    }
+  }
+
+  void setMute(String trackId, bool muted) {
+    final tp = _players[trackId];
+    if (tp != null) {
+      tp.player.setVolume(muted ? 0 : (tp.trackVolume * _masterVolume * 100).roundToDouble());
+    }
   }
 
   void setPlaybackSpeed(double speed) {
@@ -127,7 +296,7 @@ class AudioService {
   void updateMasterVolume(double volume) {
     _masterVolume = volume.clamp(0.0, 1.0);
     for (final tp in _players.values) {
-      tp.player.setVolume((_masterVolume * 100).roundToDouble());
+      tp.player.setVolume((tp.trackVolume * _masterVolume * 100).roundToDouble());
     }
   }
 
@@ -175,5 +344,99 @@ class AudioService {
 
   Future<void> dispose() async {
     await unloadAll();
+    _wavCache.clear();
+  }
+}
+
+// ── Top-level WAV synthesis (usable with Flutter.compute) ──
+
+Uint8List _encodeWav(Float64List buffer, int numSamples, int sampleRate) {
+  final bytesPerSample = 2;
+  final dataSize = numSamples * bytesPerSample;
+  final fileSize = 44 + dataSize;
+  final result = _DataWriter(fileSize);
+  result.writeString('RIFF');
+  result.writeInt32(fileSize - 8);
+  result.writeString('WAVE');
+  result.writeString('fmt ');
+  result.writeInt32(16);
+  result.writeInt16(1);
+  result.writeInt16(1);
+  result.writeInt32(sampleRate);
+  result.writeInt32(sampleRate * bytesPerSample);
+  result.writeInt16(bytesPerSample);
+  result.writeInt16(16);
+  result.writeString('data');
+  result.writeInt32(dataSize);
+  for (int i = 0; i < numSamples; i++) {
+    final clamped = buffer[i].clamp(-1.0, 1.0);
+    final sample = (clamped * 32767).round().clamp(-32768, 32767);
+    result.writeInt16(sample);
+  }
+  return result.bytes;
+}
+
+/// Top-level synth + encode function for use with [compute].
+/// [params] must contain 'notes', 'instrumentName', 'duration', 'sampleRate'.
+Uint8List _synthAndEncodeWav(Map<String, dynamic> params) {
+  final notesData = params['notes'] as List<dynamic>;
+  final instrumentName = params['instrumentName'] as String;
+  final duration = (params['duration'] as num).toDouble();
+  final sampleRate = params['sampleRate'] as int;
+
+  final inst = InstrumentPreset.fromId(instrumentName);
+  final numSamples = (sampleRate * duration).ceil();
+  final buffer = Float64List(numSamples);
+
+  for (final nd in notesData) {
+    final noteMap = nd as Map<String, dynamic>;
+    final startTime = (noteMap['startTime'] as num).toDouble();
+    final noteDuration = (noteMap['duration'] as num).toDouble();
+    final pitch = noteMap['pitch'] as int;
+    final velocity = noteMap['velocity'] as int;
+
+    final startSample = (startTime * sampleRate).round();
+    final durSamples = (noteDuration * sampleRate).round();
+    final endSample = (startSample + durSamples).clamp(0, numSamples);
+    final freq = 440 * pow(2, (pitch - 69) / 12).toDouble();
+    for (int i = startSample; i < endSample; i++) {
+      final t = (i - startSample) / sampleRate;
+      final env = inst.getEnvelope(t, noteDuration, velocity);
+      buffer[i] += inst.synthSample(t, freq, velocity) * env;
+    }
+  }
+
+  double maxAmp = 0;
+  for (final s in buffer) {
+    final a = s.abs();
+    if (a > maxAmp) maxAmp = a;
+  }
+  if (maxAmp > 0 && maxAmp > 0.95) {
+    final scale = 0.95 / maxAmp;
+    for (int i = 0; i < buffer.length; i++) buffer[i] *= scale;
+  }
+
+  return _encodeWav(buffer, numSamples, sampleRate);
+}
+
+class _DataWriter {
+  final List<int> _data;
+  int _offset = 0;
+  _DataWriter(int size) : _data = List.filled(size, 0);
+  Uint8List get bytes => Uint8List.fromList(_data);
+  void writeString(String s) {
+    for (int i = 0; i < s.length; i++) {
+      _data[_offset++] = s.codeUnitAt(i);
+    }
+  }
+  void writeInt32(int value) {
+    _data[_offset++] = value & 0xFF;
+    _data[_offset++] = (value >> 8) & 0xFF;
+    _data[_offset++] = (value >> 16) & 0xFF;
+    _data[_offset++] = (value >> 24) & 0xFF;
+  }
+  void writeInt16(int value) {
+    _data[_offset++] = value & 0xFF;
+    _data[_offset++] = (value >> 8) & 0xFF;
   }
 }

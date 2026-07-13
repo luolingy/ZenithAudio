@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../core/constants/app_constants.dart';
@@ -164,6 +165,27 @@ class _ToolButton extends StatelessWidget {
   }
 }
 
+class _StepperButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _StepperButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 20, height: 16,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Icon(icon, size: 14),
+        ),
+      ),
+    );
+  }
+}
+
 class _ToolDivider extends StatelessWidget {
   const _ToolDivider();
 
@@ -251,7 +273,7 @@ class _ProjectSettingsButton extends ConsumerWidget {
                         Text('BPM', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: 60,
+                          width: 56,
                           child: TextField(
                             controller: bpmCtrl,
                             keyboardType: TextInputType.number,
@@ -261,7 +283,7 @@ class _ProjectSettingsButton extends ConsumerWidget {
                               contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                               border: OutlineInputBorder(),
                             ),
-                            onSubmitted: (v) {
+                            onChanged: (v) {
                               final val = double.tryParse(v);
                               if (val != null) {
                                 ref.read(projectProvider.notifier).setBpm(val);
@@ -269,19 +291,58 @@ class _ProjectSettingsButton extends ConsumerWidget {
                             },
                           ),
                         ),
+                        const SizedBox(width: 2),
+                        Listener(
+                          onPointerSignal: (event) {
+                            if (event is PointerScrollEvent) {
+                              final delta = event.scrollDelta.dy < 0 ? 1 : -1;
+                              final newVal = (proj.bpm + delta).clamp(20, 300).roundToDouble();
+                              bpmCtrl.text = newVal.round().toString();
+                              ref.read(projectProvider.notifier).setBpm(newVal);
+                              setDialogState(() {});
+                            }
+                          },
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _StepperButton(
+                                icon: Icons.keyboard_arrow_up,
+                                onTap: () {
+                                  final newVal = (proj.bpm + 1).clamp(20, 300).roundToDouble();
+                                  bpmCtrl.text = newVal.round().toString();
+                                  ref.read(projectProvider.notifier).setBpm(newVal);
+                                  setDialogState(() {});
+                                },
+                              ),
+                              _StepperButton(
+                                icon: Icons.keyboard_arrow_down,
+                                onTap: () {
+                                  final newVal = (proj.bpm - 1).clamp(20, 300).roundToDouble();
+                                  bpmCtrl.text = newVal.round().toString();
+                                  ref.read(projectProvider.notifier).setBpm(newVal);
+                                  setDialogState(() {});
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onVerticalDragUpdate: (details) {
+                            final delta = (-details.delta.dy).round();
+                            if (delta == 0) return;
+                            final newVal = (proj.bpm + delta).clamp(20, 300).roundToDouble();
+                            bpmCtrl.text = newVal.round().toString();
+                            ref.read(projectProvider.notifier).setBpm(newVal);
+                            setDialogState(() {});
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text(proj.bpm.round().toString(),
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: cs.onSurface)),
+                          ),
+                        ),
                       ],
-                    ),
-                    Slider(
-                      value: proj.bpm,
-                      min: 20,
-                      max: 300,
-                      onChanged: (v) {
-                        bpmCtrl.text = v.round().toString();
-                        bpmCtrl.selection = TextSelection.fromPosition(
-                          TextPosition(offset: bpmCtrl.text.length),
-                        );
-                        ref.read(projectProvider.notifier).setBpm(v);
-                      },
                     ),
                     const SizedBox(height: 8),
 
@@ -299,8 +360,10 @@ class _ProjectSettingsButton extends ConsumerWidget {
                       min: 0.25,
                       max: 4.0,
                       divisions: 15,
-                      onChanged: (v) =>
-                          ref.read(projectProvider.notifier).setPlaybackSpeed(v),
+                      onChanged: (v) {
+                        ref.read(projectProvider.notifier).setPlaybackSpeed(v);
+                        setDialogState(() {});
+                      },
                     ),
                   ],
                 ),

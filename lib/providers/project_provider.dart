@@ -12,7 +12,6 @@ import '../core/constants/app_constants.dart';
 import '../core/utils/logger.dart';
 import '../services/audio_service.dart';
 import '../services/project_serializer.dart';
-import '../services/synth_service.dart';
 
 final projectProvider = NotifierProvider<ProjectNotifier, Project>(
   ProjectNotifier.new,
@@ -81,8 +80,32 @@ class ProjectNotifier extends Notifier<Project> {
     try {
       AppLogger.i('Saving project...');
 
-      final audioBytes = <String, Uint8List>{};
+      // Show file picker first, before serialization
+      String? outputPath;
+      if (kIsWeb) {
+        outputPath = 'web';
+      } else {
+        if (_currentFilePath != null && await File(_currentFilePath!).exists()) {
+          outputPath = _currentFilePath;
+        } else {
+          try {
+            outputPath = await FilePicker.platform.saveFile(
+              dialogTitle: 'Save Project',
+              fileName: '${state.name}${AppConstants.projectExtension}',
+              type: FileType.custom,
+              allowedExtensions: ['zap'],
+            );
+          } catch (e) {
+            AppLogger.e('File picker error', e);
+            return;
+          }
+        }
+      }
 
+      if (outputPath == null) return; // User cancelled
+
+      // Serialize project data
+      final audioBytes = <String, Uint8List>{};
       final serializer = ProjectSerializer();
       final bytes = await serializer.serialize(state, audioFileBytes: audioBytes);
 
@@ -91,23 +114,9 @@ class ProjectNotifier extends Notifier<Project> {
         webSerializer.downloadArchive(bytes, '${state.name}${AppConstants.projectExtension}');
         AppLogger.i('Project saved via browser download');
       } else {
-        String? outputPath;
-        if (_currentFilePath != null && await File(_currentFilePath!).exists()) {
-          outputPath = _currentFilePath;
-        } else {
-          outputPath = await FilePicker.platform.saveFile(
-            dialogTitle: 'Save Project',
-            fileName: '${state.name}${AppConstants.projectExtension}',
-            type: FileType.custom,
-            allowedExtensions: ['zap'],
-          );
-        }
-
-        if (outputPath != null) {
-          await File(outputPath).writeAsBytes(bytes);
-          _currentFilePath = outputPath;
-          AppLogger.i('Project saved to: $outputPath');
-        }
+        await File(outputPath).writeAsBytes(bytes);
+        _currentFilePath = outputPath;
+        AppLogger.i('Project saved to: $outputPath');
       }
     } catch (e) {
       AppLogger.e('Failed to save project', e);
@@ -165,8 +174,6 @@ class ProjectNotifier extends Notifier<Project> {
               tracks: state.tracks.map((t) => t.id == track.id ? updated : t).toList(),
             );
           });
-        } else if (track.type == TrackType.instrument) {
-          _renderAndLoadInstrument(track);
         }
       }
 
@@ -216,47 +223,11 @@ class ProjectNotifier extends Notifier<Project> {
     );
 
     state = state.copyWith(tracks: [...state.tracks, track]);
-    _renderAndLoadInstrument(track);
     AppLogger.i('Added instrument track: ${track.name}');
   }
 
   void addTrack({String? name, String? audioFilePath}) {
     addAudioTrack(name: name, audioFilePath: audioFilePath);
-  }
-
-  Future<void> _renderAndLoadInstrument(Track track) async {
-    try {
-      final synth = SynthService();
-      final audio = ref.read(audioServiceProvider);
-
-      late String audioPath;
-      late double dur;
-      if (kIsWeb) {
-        final result = await synth.renderToFile(
-          notes: track.notes,
-          instrumentName: track.instrumentName ?? 'piano',
-        );
-        audioPath = result.path;
-        dur = result.duration;
-      } else {
-        final result = await synth.renderToFile(
-          notes: track.notes,
-          instrumentName: track.instrumentName ?? 'piano',
-        );
-        audioPath = result.path;
-        dur = result.duration;
-      }
-
-      if (audioPath.isNotEmpty) {
-        final loaded = track.copyWith(audioFilePath: audioPath, duration: dur);
-        await audio.loadTrack(loaded);
-        state = state.copyWith(
-          tracks: state.tracks.map((t) => t.id == track.id ? loaded : t).toList(),
-        );
-      }
-    } catch (e) {
-      AppLogger.e('Failed to render instrument track', e);
-    }
   }
 
   Future<void> removeTrack(String trackId) async {
@@ -345,9 +316,6 @@ class ProjectNotifier extends Notifier<Project> {
         return t;
       }).toList(),
     );
-    // Re-render and reload the instrument audio.
-    final track = state.tracks.firstWhere((t) => t.id == trackId);
-    _renderAndLoadInstrument(track);
   }
 
   void setTrackInstrument(String trackId, String instrumentName) {
@@ -358,8 +326,6 @@ class ProjectNotifier extends Notifier<Project> {
         return t;
       }).toList(),
     );
-    final track = state.tracks.firstWhere((t) => t.id == trackId);
-    _renderAndLoadInstrument(track);
   }
 
   void setTimeSignature(int numerator, int denominator) {

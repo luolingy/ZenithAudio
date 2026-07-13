@@ -27,6 +27,7 @@ class TransportBar extends ConsumerWidget {
     final recState = ref.watch(recordingProvider);
     final recElapsed = ref.watch(recordingElapsedProvider);
     final isRecording = recState == RecordingState.recording;
+    final wavProgress = ref.watch(wavGenerationProgressProvider);
     final cs = Theme.of(context).colorScheme;
 
     return Container(
@@ -142,6 +143,16 @@ class TransportBar extends ConsumerWidget {
               ),
             ),
           ),
+          if (wavProgress > 0 && wavProgress < 1) ...[
+            SizedBox(
+              width: 60,
+              child: LinearProgressIndicator(
+                value: wavProgress,
+                backgroundColor: cs.surfaceContainerHigh,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           const Spacer(),
           Icon(Icons.volume_up_outlined, size: 16, color: context.outline),
           const SizedBox(width: 6),

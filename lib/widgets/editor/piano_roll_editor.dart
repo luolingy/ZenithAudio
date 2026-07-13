@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +12,7 @@ import '../../models/note.dart';
 import '../../models/project.dart';
 import '../../models/instrument.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/playback_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/synth_service.dart';
 
@@ -48,7 +48,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   bool _isSelectMode = false;
   final Set<int> _selectedIndices = {};
 
-  // Drag state
   int? _dragNoteIndex;
   bool _isResizing = false;
   double? _dragStartX;
@@ -57,7 +56,6 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   List<Note>? _localDragNotes;
   List<Rect> _ghostRects = [];
 
-  // Viewport pan
   bool _isPanning = false;
   int _activePointers = 0;
   double? _panStartX;
@@ -65,20 +63,18 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   double? _panOffX;
   double? _panOffY;
 
-  // Pinch-to-zoom
   final Map<int, Offset> _pointerPos = {};
   double? _pinchStartDist;
   double? _pinchStartZoom;
 
   bool _isCtrlDown = false;
 
-  // Playback
-  Player? _previewPlayer;
-  bool _isPlaying = false;
-  double _playPos = 0;
+  // Note preview (keyboard tap → short sound)
+  Player? _notePreviewPlayer;
   final _synth = SynthService();
-  StreamSubscription? _posSub;
-  StreamSubscription? _completedSub;
+
+  // Guard
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -89,13 +85,19 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
   @override
   void dispose() {
-    _stopPlayback();
+    _disposed = true;
+    _notePreviewPlayer?.stop();
+    _notePreviewPlayer?.dispose();
     _keyVScrollCtrl.removeListener(_syncKeyToGrid);
     _gridVScrollCtrl.removeListener(_syncGridToKey);
     _hScrollCtrl.dispose();
     _keyVScrollCtrl.dispose();
     _gridVScrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _safeSetState(VoidCallback fn) {
+    if (!_disposed && mounted) setState(fn);
   }
 
   void _syncKeyToGrid() {
@@ -137,6 +139,11 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final project = ref.watch(projectProvider);
     final settings = ref.watch(settingsProvider);
     final track = _track;
+    final playbackState = ref.watch(playbackProvider);
+    final playhead = ref.watch(playheadPositionProvider);
+
+    final isPlaying = playbackState == PlaybackState.playing;
+    final wavProgress = ref.watch(wavGenerationProgressProvider);
 
     return Scaffold(
       backgroundColor: cs.surface,
@@ -144,8 +151,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       body: Focus(
         autofocus: true,
         onKeyEvent: _onKeyEvent,
-        child: _buildBody(context, cs, track, project),
+        child: _buildBody(context, cs, track, project, isPlaying, playhead),
       ),
+      bottomNavigationBar: _buildTransportBar(cs, playbackState, playhead, project, wavProgress),
     );
   }
 
@@ -157,7 +165,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     }
     if (event.logicalKey == LogicalKeyboardKey.space &&
         event is KeyDownEvent) {
-      _togglePlayback();
+      ref.read(playbackProvider.notifier).toggle(editingTrackId: widget.trackId);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -174,31 +182,13 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       ),
       title: Row(
         children: [
-          // Transport controls
-          IconButton(
-            icon: Icon(
-              _isPlaying ? Icons.pause : Icons.play_arrow,
-              size: 20, color: cs.primary,
-            ),
-            onPressed: _togglePlayback,
-            tooltip: _isPlaying ? 'Pause' : 'Play',
-            visualDensity: VisualDensity.compact,
-          ),
-          IconButton(
-            icon: Icon(Icons.stop, size: 18, color: cs.onSurfaceVariant),
-            onPressed: _stopPlayback,
-            tooltip: 'Stop',
-            visualDensity: VisualDensity.compact,
-          ),
-          const SizedBox(width: 4),
-          // Mode toggle
           SegmentedButton<bool>(
             segments: const [
               ButtonSegment(value: false, label: Text('Edit', style: TextStyle(fontSize: 11))),
               ButtonSegment(value: true, label: Text('Select', style: TextStyle(fontSize: 11))),
             ],
             selected: {_isSelectMode},
-            onSelectionChanged: (v) => setState(() {
+            onSelectionChanged: (v) => _safeSetState(() {
               _isSelectMode = v.first;
               if (!_isSelectMode) _selectedIndices.clear();
             }),
@@ -240,7 +230,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                 value: _zoomLevel,
                 min: 0.5,
                 max: 10.0,
-                onChanged: (v) => setState(() => _zoomLevel = v),
+                onChanged: (v) => _safeSetState(() => _zoomLevel = v),
               ),
             ),
           ),
@@ -254,153 +244,94 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     );
   }
 
-  Future<void> _togglePlayback() async {
-    if (_isPlaying) {
-      _previewPlayer?.pause();
-      setState(() => _isPlaying = false);
-    } else {
-      await _startPlayback();
-    }
-  }
-
-  Future<void> _startPlayback() async {
-    final track = _track;
-    if (track.notes.isEmpty || track.instrumentName == null) return;
-
-    final inst = InstrumentPreset.fromId(track.instrumentName!);
-    final dur = track.computedDuration > 0 ? track.computedDuration + 0.5 : 2.0;
-    final numSamples = (44100 * dur).ceil();
-
-    final buffer = Float64List(numSamples);
-    final sampleRate = 44100;
-    for (final note in track.notes) {
-      final startSample = (note.startTime * sampleRate).round();
-      final durSamples = (note.duration * sampleRate).round();
-      final endSample = (startSample + durSamples).clamp(0, numSamples);
-      final freq = 440 * pow(2, (note.pitch - 69) / 12).toDouble();
-      for (int i = startSample; i < endSample; i++) {
-        final t = (i - startSample) / sampleRate;
-        final env = inst.getEnvelope(t, note.duration, note.velocity);
-        buffer[i] += inst.synthSample(t, freq, note.velocity) * env;
-      }
-    }
-
-    double maxAmp = 0;
-    for (final s in buffer) {
-      final a = s.abs();
-      if (a > maxAmp) maxAmp = a;
-    }
-    if (maxAmp > 0 && maxAmp > 0.95) {
-      final scale = 0.95 / maxAmp;
-      for (int i = 0; i < buffer.length; i++) {
-        buffer[i] *= scale;
-      }
-    }
-
-    final wav = _encodeWav(buffer, numSamples, sampleRate);
-    final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/editor_preview.wav';
-    await File(filePath).writeAsBytes(wav);
-
-    final player = Player();
-    _previewPlayer = player;
-    setState(() => _isPlaying = true);
-
-    _posSub = player.stream.position.listen((pos) {
-      if (mounted) setState(() => _playPos = pos.inMilliseconds / 1000.0);
-    });
-    _completedSub = player.stream.completed.listen((_) {
-      if (mounted) _onPlayEnd();
-    });
-    player.stream.error.listen((_) {
-      if (mounted) _onPlayEnd();
-    });
-
-    try {
-      final uri = Uri.file(filePath).toString();
-      await player.open(Media(uri));
-      await player.setVolume(100);
-      player.play();
-    } catch (_) {
-      _onPlayEnd();
-    }
-  }
-
-  void _onPlayEnd() {
-    _stopPlayback();
-  }
-
-  void _stopPlayback() {
-    _posSub?.cancel(); _posSub = null;
-    _completedSub?.cancel(); _completedSub = null;
-    _previewPlayer?.stop();
-    _previewPlayer?.dispose();
-    _previewPlayer = null;
-    if (mounted) setState(() { _isPlaying = false; _playPos = 0; });
-  }
-
-  Uint8List _encodeWav(Float64List buffer, int numSamples, int sampleRate) {
-    final bytesPerSample = 2;
-    final dataSize = numSamples * bytesPerSample;
-    final fileSize = 44 + dataSize;
-    final result = DataWriter(fileSize);
-    result.writeString('RIFF');
-    result.writeInt32(fileSize - 8);
-    result.writeString('WAVE');
-    result.writeString('fmt ');
-    result.writeInt32(16);
-    result.writeInt16(1);
-    result.writeInt16(1);
-    result.writeInt32(sampleRate);
-    result.writeInt32(sampleRate * bytesPerSample);
-    result.writeInt16(bytesPerSample);
-    result.writeInt16(16);
-    result.writeString('data');
-    result.writeInt32(dataSize);
-    for (int i = 0; i < numSamples; i++) {
-      final clamped = buffer[i].clamp(-1.0, 1.0);
-      final sample = (clamped * 32767).round().clamp(-32768, 32767);
-      result.writeInt16(sample);
-    }
-    return result.bytes;
-  }
-
-  Future<void> _previewNote(int pitch) async {
-    final track = _track;
-    if (track.instrumentName == null) return;
-    final inst = InstrumentPreset.fromId(track.instrumentName!);
-    final wav = _synth.renderPreviewWav(inst, pitch: pitch, duration: 0.3, velocity: 100);
-
-    final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/note_preview.wav';
-    await File(filePath).writeAsBytes(wav);
-
-    _previewPlayer?.stop();
-    _previewPlayer?.dispose();
-    final player = Player();
-    _previewPlayer = player;
-    player.stream.completed.listen((_) {
-      if (_previewPlayer == player) { _previewPlayer = null; }
-      player.dispose();
-    });
-
-    try {
-      await player.open(Media(Uri.file(filePath).toString()));
-      await player.setVolume(80);
-      player.play();
-    } catch (_) {
-      player.dispose();
-      if (_previewPlayer == player) _previewPlayer = null;
-    }
-  }
-
   void _cycleGridResolution() {
     final cur = ref.read(settingsProvider).gridResolution;
     final next = cur >= 1 ? 0.5 : cur >= 0.5 ? 0.25 : cur >= 0.25 ? 0.125 : 1.0;
     ref.read(settingsProvider.notifier).setGridResolution(next);
   }
 
-  Widget _buildBody(BuildContext context, ColorScheme cs, Track track, Project project) {
+  Widget _buildTransportBar(
+      ColorScheme cs, PlaybackState state, double playhead, Project project, double wavProgress) {
+    final track = _track;
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          top: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          _MiniTransportButton(
+            icon: Icons.skip_previous_rounded,
+            onTap: () => ref.read(playbackProvider.notifier).seekTo(0),
+          ),
+          const SizedBox(width: 4),
+          _MiniTransportButton(
+            icon: state == PlaybackState.playing
+                ? Icons.pause_rounded
+                : Icons.play_arrow_rounded,
+            isPrimary: true,
+            onTap: () => ref.read(playbackProvider.notifier)
+                .toggle(editingTrackId: widget.trackId),
+          ),
+          const SizedBox(width: 4),
+          _MiniTransportButton(
+            icon: Icons.stop_rounded,
+            onTap: () => ref.read(playbackProvider.notifier).stop(),
+          ),
+          const SizedBox(width: 4),
+          _MiniTransportButton(
+            icon: Icons.skip_next_rounded,
+            onTap: () {
+              final dur = project.duration > 0 ? project.duration : 60.0;
+              ref.read(playbackProvider.notifier).seekTo(dur);
+            },
+          ),
+          const SizedBox(width: 4),
+          _MiniTransportButton(
+            icon: Icons.headphones_outlined,
+            onTap: () => ref.read(projectProvider.notifier).toggleTrackSolo(widget.trackId),
+            active: track.isSolo,
+            activeColor: const Color(0xFFFFD740),
+          ),
+          const SizedBox(width: 4),
+          if (wavProgress > 0 && wavProgress < 1)
+            SizedBox(
+              width: 60,
+              child: LinearProgressIndicator(
+                value: wavProgress,
+                backgroundColor: cs.surfaceContainerHigh,
+              ),
+            ),
+          if (wavProgress > 0 && wavProgress < 1) const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: Text(
+              '${_formatTime(playhead)} / ${_formatTime(project.duration > 0 ? project.duration : 0)}',
+              style: TextStyle(color: cs.primary, fontSize: 13, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(double seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toStringAsFixed(1).padLeft(4, '0');
+    return '$m:$s';
+  }
+
+  Widget _buildBody(BuildContext context, ColorScheme cs, Track track, Project project,
+      bool isPlaying, double playhead) {
     return Row(
       children: [
         SizedBox(
@@ -408,14 +339,28 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
           child: _buildKeyboard(context, cs, track),
         ),
         Container(width: 1, color: Theme.of(context).dividerColor.withAlpha(77)),
-        Expanded(child: _buildGridArea(context, cs, track, project)),
+        Expanded(child: _buildGridArea(context, cs, track, project, isPlaying, playhead)),
       ],
     );
+  }
+
+  static const _majorScale = [0, 2, 4, 5, 7, 9, 11];
+
+  Set<int> _scalePitchClasses(String key) {
+    const map = {
+      'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3,
+      'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8,
+      'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11, 'Cb': 11,
+    };
+    final root = map[key] ?? 0;
+    return _majorScale.map((s) => (root + s) % 12).toSet();
   }
 
   Widget _buildKeyboard(BuildContext context, ColorScheme cs, Track track) {
     final divColor = Theme.of(context).dividerColor;
     final hasInstrument = track.instrumentName != null;
+    final project = ref.read(projectProvider);
+    final scalePcs = _scalePitchClasses(project.keySignature);
 
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
@@ -428,12 +373,25 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
               final pitch = _maxNote - i;
               final isC = pitch % 12 == 0;
               final isBlack = [1, 3, 6, 8, 10].contains(pitch % 12);
+              final pc = pitch % 12;
+              final inScale = scalePcs.contains(pc);
+              final isTonic = pc == scalePcs.first;
+              Color bgColor;
+              if (isBlack) {
+                bgColor = inScale
+                    ? cs.primary.withAlpha(18)
+                    : Colors.black26;
+              } else {
+                bgColor = inScale
+                    ? (isTonic ? cs.primary.withAlpha(14) : Colors.transparent)
+                    : cs.outlineVariant.withAlpha(10);
+              }
               return GestureDetector(
                 onTap: hasInstrument ? () => _previewNote(pitch) : null,
                 child: Container(
                   height: _noteRowHeight,
                   decoration: BoxDecoration(
-                    color: isBlack ? Colors.black26 : Colors.transparent,
+                    color: bgColor,
                     border: Border(
                       bottom: BorderSide(color: divColor.withAlpha(38), width: 0.5),
                     ),
@@ -453,8 +411,37 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     );
   }
 
-  Widget _buildGridArea(
-      BuildContext context, ColorScheme cs, Track track, Project project) {
+  Future<void> _previewNote(int pitch) async {
+    final track = _track;
+    if (track.instrumentName == null || _disposed) return;
+    final inst = InstrumentPreset.fromId(track.instrumentName!);
+    final wav = _synth.renderPreviewWav(inst, pitch: pitch, duration: 0.3, velocity: 100);
+
+    final dir = await getTemporaryDirectory();
+    final filePath = '${dir.path}/note_preview.wav';
+    await File(filePath).writeAsBytes(wav);
+
+    _notePreviewPlayer?.stop();
+    _notePreviewPlayer?.dispose();
+    final player = Player();
+    _notePreviewPlayer = player;
+    player.stream.completed.listen((_) {
+      if (_notePreviewPlayer == player) _notePreviewPlayer = null;
+      player.dispose();
+    });
+
+    try {
+      await player.open(Media(Uri.file(filePath).toString()));
+      await player.setVolume(80);
+      player.play();
+    } catch (_) {
+      player.dispose();
+      if (_notePreviewPlayer == player) _notePreviewPlayer = null;
+    }
+  }
+
+  Widget _buildGridArea(BuildContext context, ColorScheme cs, Track track, Project project,
+      bool isPlaying, double playhead) {
     final beatSec = project.secondsPerBeat;
     final totalTime = max(project.duration, 30.0);
     final totalWidth = totalTime * _pps;
@@ -500,8 +487,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                       dragNoteIndex: _dragNoteIndex,
                       accentColor: cs.onSurface,
                       ghostRects: _ghostRects,
-                      playPos: _isPlaying ? _playPos : null,
+                      playPos: isPlaying ? playhead : null,
                       playheadColor: cs.primary,
+                      scalePcs: _scalePitchClasses(project.keySignature),
                     ),
                   ),
                 ),
@@ -546,7 +534,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         final pts = _pointerPos.values.toList();
         final dist = (pts[0] - pts[1]).distance;
         final newZoom = (_pinchStartZoom! * (dist / _pinchStartDist!)).clamp(0.5, 10.0);
-        setState(() => _zoomLevel = newZoom);
+        _safeSetState(() => _zoomLevel = newZoom);
       }
       final dx = event.localPosition.dx - _panStartX!;
       final dy = event.localPosition.dy - _panStartY!;
@@ -571,9 +559,19 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent && _isCtrlDown) {
-      setState(() {
-        _zoomLevel = (_zoomLevel * (event.scrollDelta.dy < 0 ? 1.15 : 0.85)).clamp(0.5, 10.0);
-      });
+      final localPos = event.localPosition;
+      final oldZoom = _zoomLevel;
+      final newZoom = (oldZoom * (event.scrollDelta.dy < 0 ? 1.15 : 0.85)).clamp(0.5, 10.0);
+      final ratio = newZoom / oldZoom;
+      if (_hScrollCtrl.hasClients) {
+        final offset = _hScrollCtrl.offset;
+        _hScrollCtrl.jumpTo((offset + localPos.dx) * ratio - localPos.dx);
+      }
+      if (_gridVScrollCtrl.hasClients) {
+        final offset = _gridVScrollCtrl.offset;
+        _gridVScrollCtrl.jumpTo((offset + localPos.dy) * ratio - localPos.dy);
+      }
+      _safeSetState(() => _zoomLevel = newZoom);
     }
   }
 
@@ -594,15 +592,12 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
     if (_isSelectMode) {
       if (idx >= 0) {
-        setState(() {
-          if (_selectedIndices.contains(idx)) {
-            _selectedIndices.remove(idx);
-          } else {
-            _selectedIndices.add(idx);
-          }
+        _safeSetState(() {
+          if (_selectedIndices.contains(idx)) _selectedIndices.remove(idx);
+          else _selectedIndices.add(idx);
         });
       } else {
-        setState(() => _selectedIndices.clear());
+        _safeSetState(() => _selectedIndices.clear());
       }
     } else {
       if (idx >= 0) {
@@ -626,7 +621,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
     if (_isSelectMode) {
       if (!_selectedIndices.contains(idx)) {
-        setState(() => _selectedIndices.add(idx));
+        _safeSetState(() => _selectedIndices.add(idx));
       }
       _dragNoteIndex = idx;
       _dragStartX = localPos.dx;
@@ -660,10 +655,8 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       final rawDelta = _xToTime(curX) - _xToTime(_dragStartX!);
       final newDur = max(0.125, _snapTime(orig.duration + rawDelta));
       _localDragNotes![_dragNoteIndex!] = orig.copyWith(duration: newDur);
-      // Ghost for resize
-      final ghostX = orig.startTime * _pps;
-      final ghostW = newDur * _pps;
-      _ghostRects.add(Rect.fromLTWH(ghostX, _pitchToY(orig.pitch), ghostW, _noteRowHeight - 1));
+      _ghostRects.add(Rect.fromLTWH(
+        orig.startTime * _pps, _pitchToY(orig.pitch), newDur * _pps, _noteRowHeight - 1));
     } else {
       final rawDeltaTime = _xToTime(curX) - _xToTime(_dragStartX!);
       final rawDeltaPitch = (_dragStartY! - curY) / _noteRowHeight;
@@ -680,18 +673,17 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         _localDragNotes![i] = orig.copyWith(startTime: snapTime, pitch: snapPitch);
         _ghostRects.add(Rect.fromLTWH(
           snapTime * _pps, _pitchToY(snapPitch),
-          orig.duration * _pps, _noteRowHeight - 1,
-        ));
+          orig.duration * _pps, _noteRowHeight - 1));
       }
     }
-    setState(() {});
+    _safeSetState(() {});
   }
 
   void _onPanEnd(Track track) {
     if (_localDragNotes != null) {
       ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, _localDragNotes!);
     }
-    setState(() {
+    _safeSetState(() {
       _dragNoteIndex = null;
       _isResizing = false;
       _dragStartX = null;
@@ -765,6 +757,56 @@ class _ToolChip extends StatelessWidget {
   }
 }
 
+// ─────────────────── Mini Transport Button ───────────────────
+
+class _MiniTransportButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final bool isPrimary;
+  final bool active;
+  final Color? activeColor;
+
+  const _MiniTransportButton({
+    required this.icon,
+    this.onTap,
+    this.isPrimary = false,
+    this.active = false,
+    this.activeColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bool activated = active;
+    final Color bgColor;
+    if (activated) {
+      bgColor = activeColor ?? cs.primary;
+    } else if (isPrimary) {
+      bgColor = cs.primary;
+    } else {
+      bgColor = Colors.transparent;
+    }
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(isPrimary ? 16 : 4),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(isPrimary ? 16 : 4),
+        child: Container(
+          width: 32, height: 32,
+          alignment: Alignment.center,
+          child: Icon(
+            icon, size: 20,
+            color: activated || isPrimary
+                ? Theme.of(context).scaffoldBackgroundColor
+                : cs.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────── Painter ───────────────────
 
 class _PianoRollEditorPainter extends CustomPainter {
@@ -785,6 +827,7 @@ class _PianoRollEditorPainter extends CustomPainter {
   final List<Rect> ghostRects;
   final double? playPos;
   final Color playheadColor;
+  final Set<int> scalePcs;
 
   _PianoRollEditorPainter({
     required this.notes,
@@ -804,23 +847,30 @@ class _PianoRollEditorPainter extends CustomPainter {
     this.ghostRects = const [],
     this.playPos,
     required this.playheadColor,
+    this.scalePcs = const {},
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..strokeWidth = 0.5;
 
-    // C-note background highlight
     for (int p = minNote; p <= maxNote; p++) {
-      if (p % 12 == 0) {
+      final pc = p % 12;
+      final inScale = scalePcs.contains(pc);
+      final isTonic = scalePcs.isNotEmpty && pc == scalePcs.first;
+      if (inScale) {
         canvas.drawRect(
           Rect.fromLTWH(0, _pitchToY(p), size.width, noteRowHeight),
-          Paint()..color = Colors.white.withAlpha(8),
+          Paint()..color = (isTonic ? Colors.white : Colors.white).withAlpha(isTonic ? 14 : 8),
+        );
+      } else {
+        canvas.drawRect(
+          Rect.fromLTWH(0, _pitchToY(p), size.width, noteRowHeight),
+          Paint()..color = Colors.black.withAlpha(6),
         );
       }
     }
 
-    // Beat / bar lines
     final barSec = beatSec * timeSigNum;
     for (double t = 0; t < size.width / pps; t += beatSec) {
       final x = t * pps;
@@ -831,7 +881,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
     }
 
-    // Horizontal grid
     paint.strokeWidth = 0.5;
     paint.color = gridColor;
     for (int i = 0; i <= (maxNote - minNote); i++) {
@@ -839,7 +888,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       canvas.drawLine(Offset(0, i * noteRowHeight), Offset(size.width, i * noteRowHeight), paint);
     }
 
-    // Ghost snap rects (drawn BELOW notes)
     for (final r in ghostRects) {
       final ghostRRect = RRect.fromRectAndRadius(r, const Radius.circular(2));
       canvas.drawRRect(ghostRRect, Paint()..color = noteColor.withAlpha(40));
@@ -849,7 +897,6 @@ class _PianoRollEditorPainter extends CustomPainter {
         ..color = noteColor.withAlpha(80));
     }
 
-    // Note blocks
     for (int i = 0; i < notes.length; i++) {
       final n = notes[i];
       if (n.pitch < minNote || n.pitch > maxNote) continue;
@@ -866,11 +913,9 @@ class _PianoRollEditorPainter extends CustomPainter {
       final rrect = RRect.fromRectAndRadius(Rect.fromLTWH(x, y + 0.5, w, h), const Radius.circular(2));
 
       if (isDragged) {
-        // Shadow: offset rect behind the dragged note (looks "picked up")
         final shadowRect = RRect.fromRectAndRadius(
           Rect.fromLTWH(x + 3, y + 2.5, w, h), const Radius.circular(2));
         canvas.drawRRect(shadowRect, Paint()..color = Colors.black.withAlpha(60));
-        // Brighter fill for dragged note
         canvas.drawRRect(rrect, Paint()..color = accentColor.withAlpha(220));
         canvas.drawRRect(rrect, Paint()
           ..style = PaintingStyle.stroke
@@ -885,7 +930,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       }
     }
 
-    // Playhead
     if (playPos != null) {
       final phx = playPos! * pps;
       paint.color = playheadColor;
@@ -905,28 +949,4 @@ class _PianoRollEditorPainter extends CustomPainter {
       oldDelegate.dragNoteIndex != dragNoteIndex ||
       oldDelegate.ghostRects != ghostRects ||
       oldDelegate.playPos != playPos;
-}
-
-// ─────────────────── WAV encoder (inline) ───────────────────
-
-class DataWriter {
-  final List<int> _data;
-  int _offset = 0;
-  DataWriter(int size) : _data = List.filled(size, 0);
-  Uint8List get bytes => Uint8List.fromList(_data);
-  void writeString(String s) {
-    for (int i = 0; i < s.length; i++) {
-      _data[_offset++] = s.codeUnitAt(i);
-    }
-  }
-  void writeInt32(int value) {
-    _data[_offset++] = value & 0xFF;
-    _data[_offset++] = (value >> 8) & 0xFF;
-    _data[_offset++] = (value >> 16) & 0xFF;
-    _data[_offset++] = (value >> 24) & 0xFF;
-  }
-  void writeInt16(int value) {
-    _data[_offset++] = value & 0xFF;
-    _data[_offset++] = (value >> 8) & 0xFF;
-  }
 }
