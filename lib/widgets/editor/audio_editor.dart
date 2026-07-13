@@ -31,11 +31,19 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
   bool _syncing = false;
   bool _userInteracted = false;
 
+  bool _recoveryChecked = false;
+
   @override
   void initState() {
     super.initState();
     _rulerScrollCtrl.addListener(_onRulerScroll);
     _waveformScrollCtrl.addListener(_onWaveformScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_recoveryChecked) {
+        _recoveryChecked = true;
+        ProjectNotifier.checkForAutoSaveRecovery(context, ref);
+      }
+    });
   }
 
   @override
@@ -172,9 +180,16 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
       _autoScroll(pos);
     });
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SafeArea(
+    return PopScope(
+      canPop: !ref.read(projectProvider.notifier).isDirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final ok = await ref.read(projectProvider.notifier).confirmDiscard(context);
+        if (ok && context.mounted) Navigator.of(context).pop();
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: SafeArea(
         child: Column(
           children: [
             if (screenSize != ScreenSize.mobile) const AudioMenuBar(),
@@ -300,9 +315,10 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
             ),
             const TransportBar(),
           ],
-        ),
-      ),
-    );
+        ),    // Column
+      ),      // SafeArea
+    ),        // Scaffold
+  );          // PopScope + return
   }
 
   Widget _buildEmptyState(BuildContext context) {

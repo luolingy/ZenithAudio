@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/project.dart';
 import '../models/track.dart';
 import '../models/note.dart';
@@ -12,6 +14,7 @@ import '../core/constants/app_constants.dart';
 import '../core/utils/logger.dart';
 import '../services/audio_service.dart';
 import '../services/project_serializer.dart';
+import 'settings_provider.dart';
 
 final projectProvider = NotifierProvider<ProjectNotifier, Project>(
   ProjectNotifier.new,
@@ -24,14 +27,46 @@ class ProjectNotifier extends Notifier<Project> {
   /// Current save path for the project (set after first save or open).
   String? _currentFilePath;
 
+  /// Tracks whether there are unsaved changes.
+  bool _isDirty = false;
+
   final List<Project> _undoStack = [];
   final List<Project> _redoStack = [];
+
+  /// Auto-save timer.
+  Timer? _autoSaveTimer;
+
+  bool get isDirty => _isDirty;
+
+  /// Confirm discard if dirty. Returns true if user confirms discard/cancel.
+  Future<bool> confirmDiscard(BuildContext context) async {
+    if (!_isDirty) return true;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('未保存的更改'),
+        content: const Text('当前项目有未保存的更改，是否保存？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop('cancel'), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop('discard'), child: const Text('不保存')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop('save'), child: const Text('保存')),
+        ],
+      ),
+    );
+    if (result == 'save') {
+      await saveProject();
+      return true;
+    }
+    return result == 'discard';
+  }
 
   @override
   Project build() {
     ref.onDispose(() {
       ref.read(audioServiceProvider).dispose();
+      _autoSaveTimer?.cancel();
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) => startAutoSave());
     return Project(id: _uuid.v4(), name: 'untitled');
   }
 
@@ -74,37 +109,125 @@ class ProjectNotifier extends Notifier<Project> {
     AppLogger.i('Redo');
   }
 
+  void _markDirty() => _isDirty = true;
+
+  // ──── Auto-Save ────
+
+  void startAutoSave() {
+    _autoSaveTimer?.cancel();
+    final settings = ref.read(settingsProvider);
+    if (!settings.autoSaveEnabled) return;
+    final interval = Duration(minutes: settings.autoSaveIntervalMinutes);
+    _autoSaveTimer = Timer.periodic(interval, (_) => _autoSave());
+  }
+
+  void stopAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = null;
+  }
+
+  Future<void> _autoSave() async {
+    if (!_isDirty) return;
+    try {
+      final audioBytes = <String, Uint8List>{};
+      final serializer = ProjectSerializer();
+      final bytes = await serializer.serialize(state, audioFileBytes: audioBytes);
+      final dir = await getApplicationDocumentsDirectory();
+      final autoDir = Directory('${dir.path}/.autosave');
+      if (!await autoDir.exists()) await autoDir.create(recursive: true);
+      final path = '${autoDir.path}/${state.id}.zap';
+      await File(path).writeAsBytes(bytes);
+      AppLogger.d('Auto-saved to $path');
+    } catch (e) {
+      AppLogger.e('Auto-save failed', e);
+    }
+  }
+
+  /// Check if an auto-save cache exists for recovery.
+  static Future<String?> findAutoSaveCache(String projectId) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final path = '${dir.path}/.autosave/$projectId.zap';
+      if (await File(path).exists()) return path;
+    } catch (_) {}
+    return null;
+  }
+
+  /// Check for auto-save cache on startup and offer recovery.
+  static Future<void> checkForAutoSaveRecovery(BuildContext context, WidgetRef ref) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final autoDir = Directory('${dir.path}/.autosave');
+      if (!await autoDir.exists()) return;
+      final files = await autoDir.list().where((e) => e.path.endsWith('.zap')).toList();
+      if (files.isEmpty) return;
+      if (!context.mounted) return;
+      final recover = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('发现自动保存的缓存'),
+          content: Text('检测到 ${files.length} 个自动保存的缓存文件。是否恢复最近的项目？'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('不恢复')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('恢复')),
+          ],
+        ),
+      );
+      if (recover == true && files.isNotEmpty && context.mounted) {
+        // Open the most recent auto-save
+        final newest = files.reduce((a, b) =>
+          File(a.path).statSync().modified.isAfter(File(b.path).statSync().modified) ? a : b);
+        final bytes = await File(newest.path).readAsBytes();
+        final serializer = ProjectSerializer();
+        final serialized = await serializer.deserialize(bytes);
+        if (serialized != null && context.mounted) {
+          final notifier = ref.read(projectProvider.notifier);
+          await notifier._loadSerialized(serialized);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadSerialized(SerializedProject serialized) async {
+    await ref.read(audioServiceProvider).unloadAll();
+    final updatedTracks = serialized.project.tracks.map((t) {
+      if (t.type == TrackType.audio) {
+        final audioPath = serialized.trackAudioFiles[t.id];
+        return audioPath != null ? t.copyWith(audioFilePath: audioPath) : t;
+      }
+      return t;
+    }).toList();
+    state = serialized.project.copyWith(tracks: updatedTracks);
+    _isDirty = true;
+    for (final track in state.tracks) {
+      if (track.type == TrackType.audio && track.audioFilePath != null) {
+        ref.read(audioServiceProvider).loadTrack(track).then((dur) {
+          final updated = track.copyWith(duration: dur);
+          state = state.copyWith(
+            tracks: state.tracks.map((t) => t.id == track.id ? updated : t).toList(),
+          );
+        });
+      }
+    }
+  }
+
+  /// Clear auto-save cache after manual save.
+  Future<void> clearAutoSaveCache() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final path = '${dir.path}/.autosave/${state.id}.zap';
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
   // ──── Save / Open ────
 
   Future<void> saveProject() async {
     try {
       AppLogger.i('Saving project...');
 
-      // Show file picker first, before serialization
-      String? outputPath;
-      if (kIsWeb) {
-        outputPath = 'web';
-      } else {
-        if (_currentFilePath != null && await File(_currentFilePath!).exists()) {
-          outputPath = _currentFilePath;
-        } else {
-          try {
-            outputPath = await FilePicker.platform.saveFile(
-              dialogTitle: 'Save Project',
-              fileName: '${state.name}${AppConstants.projectExtension}',
-              type: FileType.custom,
-              allowedExtensions: ['zap'],
-            );
-          } catch (e) {
-            AppLogger.e('File picker error', e);
-            return;
-          }
-        }
-      }
-
-      if (outputPath == null) return; // User cancelled
-
-      // Serialize project data
+      // Serialize FIRST (before file picker on mobile)
       final audioBytes = <String, Uint8List>{};
       final serializer = ProjectSerializer();
       final bytes = await serializer.serialize(state, audioFileBytes: audioBytes);
@@ -113,11 +236,60 @@ class ProjectNotifier extends Notifier<Project> {
         final webSerializer = ProjectSerializer();
         webSerializer.downloadArchive(bytes, '${state.name}${AppConstants.projectExtension}');
         AppLogger.i('Project saved via browser download');
-      } else {
-        await File(outputPath).writeAsBytes(bytes);
-        _currentFilePath = outputPath;
-        AppLogger.i('Project saved to: $outputPath');
+        return;
       }
+
+      // Resolve output path
+      String? outputPath;
+      if (_currentFilePath != null && await File(_currentFilePath!).exists()) {
+        outputPath = _currentFilePath;
+      } else {
+        try {
+          if (Platform.isAndroid) {
+            // On Android, pass bytes directly so FilePicker writes via ContentResolver
+            outputPath = await FilePicker.platform.saveFile(
+              dialogTitle: 'Save Project',
+              fileName: '${state.name}${AppConstants.projectExtension}',
+              type: FileType.custom,
+              allowedExtensions: ['zap'],
+              bytes: bytes,
+            );
+          } else {
+            outputPath = await FilePicker.platform.saveFile(
+              dialogTitle: 'Save Project',
+              fileName: '${state.name}${AppConstants.projectExtension}',
+              type: FileType.custom,
+              allowedExtensions: ['zap'],
+            );
+          }
+        } catch (e) {
+          AppLogger.e('File picker error', e);
+          return;
+        }
+      }
+
+      if (outputPath == null) return; // User cancelled
+
+      if (Platform.isIOS) {
+        // On iOS, saveFile returns a writable sandbox path, fallback to docs
+        try {
+          await File(outputPath).writeAsBytes(bytes);
+        } catch (e) {
+          AppLogger.w('iOS save to picker path failed, using app docs: $e');
+          final dir = await getApplicationDocumentsDirectory();
+          outputPath = '${dir.path}/${state.name}${AppConstants.projectExtension}';
+          await File(outputPath).writeAsBytes(bytes);
+        }
+      } else if (!Platform.isAndroid) {
+        // Desktop: write directly
+        await File(outputPath).writeAsBytes(bytes);
+      }
+      // On Android with bytes param, file is already written by the picker
+
+      _currentFilePath = outputPath;
+      _isDirty = false;
+      clearAutoSaveCache();
+      AppLogger.i('Project saved to: $outputPath');
     } catch (e) {
       AppLogger.e('Failed to save project', e);
     }
@@ -125,6 +297,8 @@ class ProjectNotifier extends Notifier<Project> {
 
   Future<void> openProject() async {
     _pushUndo();
+    _isDirty = false;
+    stopAutoSave();
     try {
       AppLogger.i('Opening project...');
 
@@ -187,6 +361,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   void addAudioTrack({String? name, String? audioFilePath}) {
     _pushUndo();
+    _markDirty();
     final trackColors = _trackColors();
     final track = Track(
       id: _uuid.v4(),
@@ -212,6 +387,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   void addInstrumentTrack({String? name, String? instrumentName}) {
     _pushUndo();
+    _markDirty();
     final trackColors = _trackColors();
     final track = Track(
       id: _uuid.v4(),
@@ -232,6 +408,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   Future<void> removeTrack(String trackId) async {
     _pushUndo();
+    _markDirty();
     await ref.read(audioServiceProvider).unloadTrack(trackId);
     final removedName = state.tracks.firstWhere((t) => t.id == trackId).name;
     state = state.copyWith(
@@ -241,6 +418,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void updateTrackVolume(String trackId, double volume) {
+    _markDirty();
     final trackName = state.tracks.firstWhere((t) => t.id == trackId).name;
     state = state.copyWith(
       tracks: state.tracks.map((t) {
@@ -253,6 +431,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void toggleTrackMute(String trackId) {
+    _markDirty();
     final track = state.tracks.firstWhere((t) => t.id == trackId);
     final newMuted = !track.isMuted;
     state = state.copyWith(
@@ -266,6 +445,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void toggleTrackSolo(String trackId) {
+    _markDirty();
     final track = state.tracks.firstWhere((t) => t.id == trackId);
     final newSolo = !track.isSolo;
     state = state.copyWith(
@@ -290,6 +470,7 @@ class ProjectNotifier extends Notifier<Project> {
   }
 
   void setTrackAudioFile(String trackId, String filePath) {
+    _markDirty();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(audioFilePath: filePath);
@@ -300,6 +481,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   void renameTrack(String trackId, String newName) {
     _pushUndo();
+    _markDirty();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(name: newName);
@@ -310,6 +492,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   void updateTrackNotes(String trackId, List<Note> notes) {
     _pushUndo();
+    _markDirty();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(notes: notes);
@@ -320,6 +503,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   void setTrackInstrument(String trackId, String instrumentName) {
     _pushUndo();
+    _markDirty();
     state = state.copyWith(
       tracks: state.tracks.map((t) {
         if (t.id == trackId) return t.copyWith(instrumentName: instrumentName);
@@ -330,6 +514,7 @@ class ProjectNotifier extends Notifier<Project> {
 
   void setTimeSignature(int numerator, int denominator) {
     _pushUndo();
+    _markDirty();
     state = state.copyWith(
       timeSignatureNumerator: numerator,
       timeSignatureDenominator: denominator,
@@ -339,29 +524,64 @@ class ProjectNotifier extends Notifier<Project> {
 
   void setKeySignature(String key) {
     _pushUndo();
+    _markDirty();
     state = state.copyWith(keySignature: key);
     AppLogger.i('Key signature: $key');
   }
 
+  static const double referenceBpm = 120.0;
+
   void setBpm(double bpm) {
     _pushUndo();
-    state = state.copyWith(bpm: bpm.clamp(20, 300));
-    AppLogger.i('BPM: ${bpm.toStringAsFixed(1)}');
+    _markDirty();
+    bpm = bpm.clamp(20, 300);
+    final speed = bpm / referenceBpm;
+    state = state.copyWith(bpm: bpm, playbackSpeed: speed);
+    ref.read(audioServiceProvider).setPlaybackSpeed(speed);
+    AppLogger.i('BPM: ${bpm.toStringAsFixed(1)} (speed: ${speed.toStringAsFixed(3)}x)');
   }
 
   void setPlaybackSpeed(double speed) {
     _pushUndo();
-    state = state.copyWith(playbackSpeed: speed.clamp(0.25, 4.0));
-    ref.read(audioServiceProvider).setPlaybackSpeed(speed.clamp(0.25, 4.0));
-    AppLogger.i('Playback speed: ${speed.toStringAsFixed(2)}x');
+    _markDirty();
+    speed = speed.clamp(0.25, 4.0);
+    final bpm = speed * referenceBpm;
+    state = state.copyWith(playbackSpeed: speed, bpm: bpm);
+    ref.read(audioServiceProvider).setPlaybackSpeed(speed);
+    AppLogger.i('Playback speed: ${speed.toStringAsFixed(2)}x (BPM: ${bpm.toStringAsFixed(1)})');
   }
 
-  Future<void> newProject() async {
+  Future<void> forceNewProject() async {
     _pushUndo();
+    _isDirty = false;
+    stopAutoSave();
     await ref.read(audioServiceProvider).unloadAll();
     _currentFilePath = null;
     state = Project(id: _uuid.v4(), name: 'Untitled');
     AppLogger.i('New project created');
+  }
+
+  Future<void> tryNewProject(BuildContext context) async {
+    if (_isDirty) {
+      final result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('未保存的更改'),
+          content: const Text('当前项目有未保存的更改，是否保存？'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop('cancel'), child: const Text('取消')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop('discard'), child: const Text('不保存')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop('save'), child: const Text('保存')),
+          ],
+        ),
+      );
+      if (result == 'save') {
+        await saveProject();
+      } else if (result != 'discard') {
+        return; // cancelled
+      }
+    }
+    await forceNewProject();
   }
 
   List<Color> _trackColors() => [

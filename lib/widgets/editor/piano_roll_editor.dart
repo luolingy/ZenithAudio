@@ -15,6 +15,9 @@ import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/synth_service.dart';
+import '../../core/utils/logger.dart';
+
+enum ViewportMode { edit, select, scroll }
 
 class PianoRollEditor extends ConsumerStatefulWidget {
   final String trackId;
@@ -45,8 +48,10 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   static const int _maxNote = 108;
   static const int _noteCount = _maxNote - _minNote + 1;
 
-  bool _isSelectMode = false;
+  ViewportMode _viewportMode = ViewportMode.edit;
   final Set<int> _selectedIndices = {};
+  Rect? _selectionRect;
+  Offset? _selectionStart;
 
   int? _dragNoteIndex;
   bool _isResizing = false;
@@ -182,15 +187,16 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       ),
       title: Row(
         children: [
-          SegmentedButton<bool>(
+          SegmentedButton<ViewportMode>(
             segments: const [
-              ButtonSegment(value: false, label: Text('Edit', style: TextStyle(fontSize: 11))),
-              ButtonSegment(value: true, label: Text('Select', style: TextStyle(fontSize: 11))),
+              ButtonSegment(value: ViewportMode.edit, label: Text('Edit', style: TextStyle(fontSize: 11))),
+              ButtonSegment(value: ViewportMode.select, label: Text('Select', style: TextStyle(fontSize: 11))),
+              ButtonSegment(value: ViewportMode.scroll, label: Text('Scroll', style: TextStyle(fontSize: 11))),
             ],
-            selected: {_isSelectMode},
+            selected: {_viewportMode},
             onSelectionChanged: (v) => _safeSetState(() {
-              _isSelectMode = v.first;
-              if (!_isSelectMode) _selectedIndices.clear();
+              _viewportMode = v.first;
+              if (_viewportMode != ViewportMode.select) _selectedIndices.clear();
             }),
             style: ButtonStyle(
               visualDensity: VisualDensity.compact,
@@ -418,25 +424,39 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final wav = _synth.renderPreviewWav(inst, pitch: pitch, duration: 0.3, velocity: 100);
 
     final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/note_preview.wav';
+    if (_disposed) return;
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final filePath = '${dir.path}/note_preview_$ts.wav';
     await File(filePath).writeAsBytes(wav);
+    if (_disposed) return;
 
     _notePreviewPlayer?.stop();
     _notePreviewPlayer?.dispose();
     final player = Player();
     _notePreviewPlayer = player;
+
     player.stream.completed.listen((_) {
-      if (_notePreviewPlayer == player) _notePreviewPlayer = null;
+      if (!_disposed && _notePreviewPlayer == player) {
+        _notePreviewPlayer = null;
+      }
+      player.dispose();
+    });
+    player.stream.error.listen((e) {
+      if (!_disposed && _notePreviewPlayer == player) {
+        _notePreviewPlayer = null;
+      }
       player.dispose();
     });
 
     try {
       await player.open(Media(Uri.file(filePath).toString()));
-      await player.setVolume(80);
+      if (_disposed) { player.dispose(); return; }
+      await player.setVolume(100);
       player.play();
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.e('Preview note playback failed', e, st);
       player.dispose();
-      if (_notePreviewPlayer == player) _notePreviewPlayer = null;
+      if (!_disposed && _notePreviewPlayer == player) _notePreviewPlayer = null;
     }
   }
 
@@ -490,6 +510,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                       playPos: isPlaying ? playhead : null,
                       playheadColor: cs.primary,
                       scalePcs: _scalePitchClasses(project.keySignature),
+                    selectionRect: _selectionRect,
                     ),
                   ),
                 ),
@@ -517,11 +538,16 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       _dragOriginNotes = null;
       _localDragNotes = null;
       _ghostRects = [];
+      _selectionRect = null;
+      _selectionStart = null;
       _startPan(event.localPosition);
       final pts = _pointerPos.values.toList();
       _pinchStartDist = (pts[1] - pts[0]).distance;
       _pinchStartZoom = _zoomLevel;
     } else if (_activePointers > 2) {
+      _startPan(event.localPosition);
+    } else if (_viewportMode == ViewportMode.scroll) {
+      // Single-finger pan in scroll mode
       _startPan(event.localPosition);
     }
   }
@@ -534,6 +560,19 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         final pts = _pointerPos.values.toList();
         final dist = (pts[0] - pts[1]).distance;
         final newZoom = (_pinchStartZoom! * (dist / _pinchStartDist!)).clamp(0.5, 10.0);
+        final ratio = newZoom / _pinchStartZoom!;
+        if (ratio != 1.0) {
+          // Focal point anchoring: keep content under pinch center stationary
+          final focus = (pts[0] + pts[1]) / 2;
+          if (_hScrollCtrl.hasClients) {
+            final offset = _hScrollCtrl.offset;
+            _hScrollCtrl.jumpTo((offset + focus.dx) * ratio - focus.dx);
+          }
+          if (_gridVScrollCtrl.hasClients) {
+            final offset = _gridVScrollCtrl.offset;
+            _gridVScrollCtrl.jumpTo((offset + focus.dy) * ratio - focus.dy);
+          }
+        }
         _safeSetState(() => _zoomLevel = newZoom);
       }
       final dx = event.localPosition.dx - _panStartX!;
@@ -554,6 +593,11 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       _isPanning = false;
       _pinchStartDist = null;
       _pinchStartZoom = null;
+      // Clear selection rect if pan gesture stole it before onPanEnd
+      if (_viewportMode == ViewportMode.scroll) {
+        _selectionRect = null;
+        _selectionStart = null;
+      }
     }
   }
 
@@ -590,7 +634,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final localPos = details.localPosition;
     final idx = _noteIndexAt(localPos, track.notes);
 
-    if (_isSelectMode) {
+    if (_viewportMode == ViewportMode.select) {
       if (idx >= 0) {
         _safeSetState(() {
           if (_selectedIndices.contains(idx)) _selectedIndices.remove(idx);
@@ -599,7 +643,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       } else {
         _safeSetState(() => _selectedIndices.clear());
       }
-    } else {
+    } else if (_viewportMode == ViewportMode.edit) {
       if (idx >= 0) {
         final updated = List<Note>.from(track.notes)..removeAt(idx);
         ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, updated);
@@ -607,11 +651,39 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
         _addNoteAt(localPos, track, project);
       }
     }
+    // In scroll mode, taps do nothing
   }
 
   void _onPanStart(DragStartDetails details, Track track) {
     if (_isPanning) return;
     final localPos = details.localPosition;
+
+    // Scroll mode → handled by _onPointerDown single-finger pan
+    if (_viewportMode == ViewportMode.scroll) return;
+
+    if (_viewportMode == ViewportMode.select) {
+      final idx = _noteIndexAt(localPos, track.notes);
+      if (idx >= 0) {
+        // Drag selected notes
+        if (!_selectedIndices.contains(idx)) {
+          _safeSetState(() => _selectedIndices.add(idx));
+        }
+        _dragOriginNotes = track.notes.map((n) => n.copyWith()).toList();
+        _localDragNotes = List<Note>.from(track.notes);
+        _ghostRects = [];
+        _dragNoteIndex = idx;
+        _dragStartX = localPos.dx;
+        _dragStartY = localPos.dy;
+        _isResizing = false;
+      } else {
+        // Start rectangle selection
+        _selectionStart = localPos;
+        _selectionRect = Rect.fromPoints(localPos, localPos);
+      }
+      return;
+    }
+
+    // Edit mode
     final idx = _noteIndexAt(localPos, track.notes);
     if (idx < 0) return;
 
@@ -619,34 +691,34 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     _localDragNotes = List<Note>.from(track.notes);
     _ghostRects = [];
 
-    if (_isSelectMode) {
-      if (!_selectedIndices.contains(idx)) {
-        _safeSetState(() => _selectedIndices.add(idx));
-      }
+    final n = track.notes[idx];
+    final noteRightX = _timeToX(n.startTime + n.duration);
+    if ((localPos.dx - noteRightX).abs() < 8.0) {
+      _dragNoteIndex = idx;
+      _dragStartX = localPos.dx;
+      _isResizing = true;
+    } else {
       _dragNoteIndex = idx;
       _dragStartX = localPos.dx;
       _dragStartY = localPos.dy;
       _isResizing = false;
-    } else {
-      final n = track.notes[idx];
-      final noteRightX = _timeToX(n.startTime + n.duration);
-      if ((localPos.dx - noteRightX).abs() < 8.0) {
-        _dragNoteIndex = idx;
-        _dragStartX = localPos.dx;
-        _isResizing = true;
-      } else {
-        _dragNoteIndex = idx;
-        _dragStartX = localPos.dx;
-        _dragStartY = localPos.dy;
-        _isResizing = false;
-      }
     }
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
-    if (_isPanning || _dragNoteIndex == null || _dragOriginNotes == null || _localDragNotes == null) return;
+    if (_isPanning) return;
     final curX = details.localPosition.dx;
     final curY = details.localPosition.dy;
+
+    // Selection rectangle in progress
+    if (_viewportMode == ViewportMode.select && _selectionStart != null) {
+      _safeSetState(() {
+        _selectionRect = Rect.fromPoints(_selectionStart!, Offset(curX, curY));
+      });
+      return;
+    }
+
+    if (_dragNoteIndex == null || _dragOriginNotes == null || _localDragNotes == null) return;
 
     _ghostRects = [];
 
@@ -663,7 +735,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       final deltaPitch = rawDeltaPitch.round();
       if (rawDeltaTime == 0 && deltaPitch == 0) return;
 
-      final indices = _isSelectMode ? _selectedIndices.toList() : [_dragNoteIndex!];
+      final indices = _viewportMode == ViewportMode.select ? _selectedIndices.toList() : [_dragNoteIndex!];
       for (final i in indices) {
         if (i < 0 || i >= _localDragNotes!.length) continue;
         if (i >= _dragOriginNotes!.length) continue;
@@ -679,10 +751,31 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     _safeSetState(() {});
   }
 
+  Rect _normalizeRect(Rect r) {
+    return Rect.fromLTRB(
+      min(r.left, r.right), min(r.top, r.bottom),
+      max(r.left, r.right), max(r.top, r.bottom));
+  }
+
   void _onPanEnd(Track track) {
     if (_localDragNotes != null) {
       ref.read(projectProvider.notifier).updateTrackNotes(widget.trackId, _localDragNotes!);
     }
+
+    // Finalize rectangle selection
+    if (_viewportMode == ViewportMode.select && _selectionRect != null) {
+      final r = _normalizeRect(_selectionRect!);
+      for (int i = 0; i < track.notes.length; i++) {
+        final n = track.notes[i];
+        final noteRect = Rect.fromLTWH(
+          _timeToX(n.startTime), _pitchToY(n.pitch),
+          _timeToX(n.duration), _noteRowHeight);
+        if (r.overlaps(noteRect)) {
+          _selectedIndices.add(i);
+        }
+      }
+    }
+
     _safeSetState(() {
       _dragNoteIndex = null;
       _isResizing = false;
@@ -691,6 +784,8 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
       _dragOriginNotes = null;
       _localDragNotes = null;
       _ghostRects = [];
+      _selectionRect = null;
+      _selectionStart = null;
     });
   }
 
@@ -828,6 +923,7 @@ class _PianoRollEditorPainter extends CustomPainter {
   final double? playPos;
   final Color playheadColor;
   final Set<int> scalePcs;
+  final Rect? selectionRect;
 
   _PianoRollEditorPainter({
     required this.notes,
@@ -848,6 +944,7 @@ class _PianoRollEditorPainter extends CustomPainter {
     this.playPos,
     required this.playheadColor,
     this.scalePcs = const {},
+    this.selectionRect,
   });
 
   @override
@@ -930,6 +1027,19 @@ class _PianoRollEditorPainter extends CustomPainter {
       }
     }
 
+    if (selectionRect != null) {
+      final r = Rect.fromLTRB(
+        min(selectionRect!.left, selectionRect!.right),
+        min(selectionRect!.top, selectionRect!.bottom),
+        max(selectionRect!.left, selectionRect!.right),
+        max(selectionRect!.top, selectionRect!.bottom));
+      canvas.drawRect(r, Paint()..color = accentColor.withAlpha(30));
+      canvas.drawRect(r, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = accentColor.withAlpha(180));
+    }
+
     if (playPos != null) {
       final phx = playPos! * pps;
       paint.color = playheadColor;
@@ -948,5 +1058,6 @@ class _PianoRollEditorPainter extends CustomPainter {
       oldDelegate.selectedIndices != selectedIndices ||
       oldDelegate.dragNoteIndex != dragNoteIndex ||
       oldDelegate.ghostRects != ghostRects ||
-      oldDelegate.playPos != playPos;
+      oldDelegate.playPos != playPos ||
+      oldDelegate.selectionRect != selectionRect;
 }

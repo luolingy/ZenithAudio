@@ -6,6 +6,7 @@ import '../../models/track.dart';
 import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import 'piano_roll_editor.dart';
+import 'audio_clip_editor.dart';
 
 String _formatDuration(double sec) {
   final m = (sec ~/ 60).toString().padLeft(2, '0');
@@ -29,6 +30,17 @@ class TrackTile extends ConsumerWidget {
     final cs = Theme.of(context).colorScheme;
 
     return GestureDetector(
+      onTap: () {
+        if (track.type == TrackType.instrument) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PianoRollEditor(trackId: track.id),
+            ),
+          );
+        } else if (track.type == TrackType.audio) {
+          openAudioClipEditor(context, track.id);
+        }
+      },
       onSecondaryTapDown: (details) =>
           _showContextMenu(context, ref, details.localPosition),
       onLongPressStart: (details) =>
@@ -172,6 +184,8 @@ class TrackTile extends ConsumerWidget {
     if (track.type == TrackType.instrument) {
       items.add(const PopupMenuItem(value: 'editPianoRoll', child: Text('编辑钢琴卷帘')));
       items.add(const PopupMenuItem(value: 'changeInstrument', child: Text('更换乐器')));
+    } else if (track.type == TrackType.audio) {
+      items.add(const PopupMenuItem(value: 'editAudio', child: Text('编辑音频')));
     }
     items.add(const PopupMenuItem(value: 'delete', child: Text('删除')));
 
@@ -192,6 +206,8 @@ class TrackTile extends ConsumerWidget {
               builder: (_) => PianoRollEditor(trackId: track.id),
             ),
           );
+        case 'editAudio':
+          openAudioClipEditor(context, track.id);
         case 'changeInstrument':
           _showChangeInstrumentDialog(context, ref);
         case 'delete':

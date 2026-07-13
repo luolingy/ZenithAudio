@@ -125,6 +125,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
 
     ref.read(wavGenerationProgressProvider.notifier).state = 1.0;
+    audio.setPlaybackSpeed(project.playbackSpeed);
     await audio.play();
     state = PlaybackState.playing;
   }

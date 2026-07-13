@@ -52,6 +52,9 @@ class AudioService {
   final Map<String, _WavCache> _wavCache = {};
   bool _isPlaying = false;
   double _masterVolume = 1.0;
+  double _playbackSpeed = 1.0;
+  int _completedTracks = 0;
+  int _totalTracks = 0;
 
   void Function(double position)? onPositionChanged;
   void Function()? onCompleted;
@@ -80,6 +83,7 @@ class AudioService {
 
       final vol = (track.volume * _masterVolume * 100).roundToDouble();
       await player.setVolume(vol);
+      await player.setRate(_playbackSpeed);
 
       _players[track.id] = tp;
       tp.trackVolume = track.volume;
@@ -87,8 +91,11 @@ class AudioService {
       tp.completedSub = player.stream.completed.listen((completed) {
         if (tp._disposed) return;
         if (completed) {
-          _isPlaying = false;
-          onCompleted?.call();
+          _completedTracks++;
+          if (_completedTracks >= _totalTracks) {
+            _isPlaying = false;
+            onCompleted?.call();
+          }
         }
       });
 
@@ -100,6 +107,7 @@ class AudioService {
         onPositionChanged?.call(position.inMilliseconds / 1000.0);
       });
 
+      _totalTracks++;
       double dur = player.state.duration.inMilliseconds / 1000.0;
       if (dur <= 0) {
         try {
@@ -220,6 +228,7 @@ class AudioService {
         await player.open(Media(Uri.file(path).toString()), play: false);
         final vol = (track.volume * _masterVolume * 100).roundToDouble();
         await player.setVolume(track.isMuted ? 0 : vol);
+        await player.setRate(_playbackSpeed);
         _players[track.id] = tp;
         tp.trackVolume = track.volume;
       } catch (e) {
@@ -237,14 +246,18 @@ class AudioService {
     try {
       await player.open(Media(Uri.file(path).toString()), play: false);
       await player.setVolume(muted ? 0 : (volume * _masterVolume * 100).roundToDouble());
+      await player.setRate(_playbackSpeed);
       _players[trackId] = tp;
       tp.trackVolume = volume;
 
       tp.completedSub = player.stream.completed.listen((completed) {
         if (tp._disposed) return;
         if (completed) {
-          _isPlaying = false;
-          onCompleted?.call();
+          _completedTracks++;
+          if (_completedTracks >= _totalTracks) {
+            _isPlaying = false;
+            onCompleted?.call();
+          }
         }
       });
 
@@ -255,6 +268,7 @@ class AudioService {
         _lastPositionUpdate = now;
         onPositionChanged?.call(position.inMilliseconds / 1000.0);
       });
+      _totalTracks++;
     } catch (e) {
       tp.dispose();
     }
@@ -288,6 +302,7 @@ class AudioService {
   }
 
   void setPlaybackSpeed(double speed) {
+    _playbackSpeed = speed;
     for (final tp in _players.values) {
       tp.player.setRate(speed);
     }
@@ -303,6 +318,8 @@ class AudioService {
   Future<void> play() async {
     if (_players.isEmpty) return;
     _isPlaying = true;
+    _completedTracks = 0;
+    _totalTracks = _players.length;
     for (final tp in _players.values) {
       tp.player.play();
     }
@@ -340,6 +357,8 @@ class AudioService {
     }
     _players.clear();
     _isPlaying = false;
+    _completedTracks = 0;
+    _totalTracks = 0;
   }
 
   Future<void> dispose() async {

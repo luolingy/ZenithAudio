@@ -28,8 +28,8 @@ class AudioToolBar extends ConsumerWidget {
           _ToolButton(
             icon: Icons.note_add_outlined,
             tooltip: 'toolbar.newProject'.tr(),
-            onTap: () {
-              ref.read(projectProvider.notifier).newProject();
+            onTap: () async {
+              await ref.read(projectProvider.notifier).tryNewProject(context);
               AppLogger.i('New project');
             },
           ),
