@@ -9,10 +9,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/audio_clip.dart';
 import '../../models/track.dart';
-import '../../models/project.dart';
+
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../services/audio_service.dart';
+import '../../services/audio_converter.dart';
 import '../../services/fft_service.dart';
 import '../../services/audio_processing_service.dart';
 import '../../core/utils/logger.dart';
@@ -101,6 +102,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   AudioClip? _clip;
   bool _loading = true;
   bool _disposed = false;
+  String? _loadError;
 
   double _zoom = 2.0;
   double get _pps => (_basePps * _zoom).clamp(20, 600);
@@ -159,10 +161,23 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     _track = track;
 
     if (track.audioFilePath != null && await File(track.audioFilePath!).exists()) {
-      final samples = await _readWavFile(track.audioFilePath!);
-      if (samples != null) {
-        _clip = AudioClip(samples: samples, sampleRate: 44100, sourceFile: track.audioFilePath);
+      final originalPath = track.audioFilePath!;
+      var samples = await _readWavFile(originalPath);
+      var sourceFile = originalPath;
+      if (samples == null) {
+        final converted = await convertToWav(originalPath);
+        if (converted != null) {
+          sourceFile = converted;
+          samples = await _readWavFile(sourceFile);
+        }
       }
+      if (samples != null) {
+        _clip = AudioClip(samples: samples, sampleRate: widget.initialSampleRate ?? 44100, sourceFile: sourceFile);
+      } else {
+        _loadError = '无法读取音频文件（格式不支持或文件损坏）。请使用 WAV 格式。';
+      }
+    } else {
+      _loadError = '音频文件未找到。';
     }
 
     _safeSetState(() => _loading = false);
@@ -173,36 +188,69 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     try {
       final file = File(path);
       final bytes = await file.readAsBytes();
-      if (bytes.length < 44) return null;
+      if (bytes.length < 12) return null;
 
-      final int sampleRate = ByteData.sublistView(bytes, 24, 28).getUint32(0, Endian.little);
-      final int bitsPerSample = ByteData.sublistView(bytes, 34, 36).getUint16(0, Endian.little);
-      final int dataOffset = ByteData.sublistView(bytes, 40, 44).getUint32(0, Endian.little) + 44;
-      final int dataSize = bytes.length - dataOffset;
+      // RIFF header: "RIFF" + fileSize + "WAVE"
+      final riff = String.fromCharCodes(bytes.sublist(0, 4));
+      if (riff != 'RIFF') return null;
+      final wave = String.fromCharCodes(bytes.sublist(8, 12));
+      if (wave != 'WAVE') return null;
+
+      // Parse sub-chunks to find "fmt " and "data"
+      int channels = 1;
+      int bitsPerSample = 16;
+      int dataOffset = 0;
+      int dataSize = 0;
+      int offset = 12;
+      while (offset + 8 <= bytes.length) {
+        final chunkId = String.fromCharCodes(bytes.sublist(offset, offset + 4));
+        final chunkSize = ByteData.sublistView(bytes, offset + 4, offset + 8).getUint32(0, Endian.little);
+        if (chunkId == 'fmt ') {
+          if (chunkSize >= 16) {
+            final audioFormat = ByteData.sublistView(bytes, offset + 8, offset + 10).getUint16(0, Endian.little);
+            if (audioFormat != 1) return null; // Only PCM supported
+            channels = ByteData.sublistView(bytes, offset + 10, offset + 12).getUint16(0, Endian.little);
+            bitsPerSample = ByteData.sublistView(bytes, offset + 22, offset + 24).getUint16(0, Endian.little);
+          }
+        } else if (chunkId == 'data') {
+          dataOffset = offset + 8;
+          dataSize = chunkSize.toInt();
+        }
+        offset += 8 + chunkSize + (chunkSize % 2); // Skip padding byte if odd-sized
+      }
+
+      if (dataSize <= 0) return null;
 
       final int bytesPerSample = bitsPerSample ~/ 8;
-      final int numSamples = dataSize ~/ bytesPerSample;
+      final int totalSamples = dataSize ~/ bytesPerSample;
+      final int numSamples = totalSamples ~/ channels; // De-interleave to mono
       final result = Float64List(numSamples);
 
       if (bitsPerSample == 16) {
         for (int i = 0; i < numSamples; i++) {
-          final int sample = ByteData.sublistView(bytes, dataOffset + i * 2, dataOffset + i * 2 + 2).getInt16(0, Endian.little);
+          final srcIdx = dataOffset + i * channels * 2;
+          final int sample = ByteData.sublistView(bytes, srcIdx, srcIdx + 2).getInt16(0, Endian.little);
           result[i] = sample / 32768.0;
         }
       } else if (bitsPerSample == 24) {
         for (int i = 0; i < numSamples; i++) {
-          final int b0 = bytes[dataOffset + i * 3];
-          final int b1 = bytes[dataOffset + i * 3 + 1];
-          final int b2 = bytes[dataOffset + i * 3 + 2];
+          final srcIdx = dataOffset + i * channels * 3;
+          final int b0 = bytes[srcIdx];
+          final int b1 = bytes[srcIdx + 1];
+          final int b2 = bytes[srcIdx + 2];
           int sample = b0 | (b1 << 8) | (b2 << 16);
           if (sample >= 0x800000) sample -= 0x1000000;
           result[i] = sample / 8388608.0;
         }
       } else if (bitsPerSample == 32) {
         for (int i = 0; i < numSamples; i++) {
-          final int sample = ByteData.sublistView(bytes, dataOffset + i * 4, dataOffset + i * 4 + 4).getInt32(0, Endian.little);
+          final srcIdx = dataOffset + i * channels * 4;
+          final int sample = ByteData.sublistView(bytes, srcIdx, srcIdx + 4).getInt32(0, Endian.little);
           result[i] = sample / 2147483648.0;
         }
+      } else {
+        AppLogger.w('Unsupported WAV bit depth: $bitsPerSample');
+        return null;
       }
       return result;
     } catch (e) {
@@ -367,39 +415,51 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: _buildAppBar(cs, isDesktop),
-      body: _clip == null
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+      body: ClipRect(
+        child: Stack(
+          children: [
+            if (_clip != null)
+              Column(
                 children: [
-                  Icon(Icons.audio_file_outlined, size: 48, color: cs.onSurfaceVariant),
-                  const SizedBox(height: 8),
-                  Text('No audio data', style: TextStyle(color: cs.onSurfaceVariant)),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Generate Waveform'),
-                    onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
-                  ),
+                  Expanded(child: _buildWaveformArea(cs)),
+                  _buildTransportBar(cs),
                 ],
+              )
+            else
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.audio_file_outlined, size: 48, color: cs.onSurfaceVariant),
+                    const SizedBox(height: 8),
+                    Text(_loadError ?? 'No audio data', style: TextStyle(color: _loadError != null ? cs.error : cs.onSurfaceVariant)),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Generate Waveform'),
+                      onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
+                    ),
+                  ],
+                ),
               ),
-            )
-          : Column(
-              children: [
-                Expanded(child: _buildWaveformArea(cs)),
-                if (_showGenerator)
-                  GeneratorPanel(
-                    onGenerate: (samples, type) {
-                      _safeSetState(() {
-                        _clip = AudioClip(samples: samples, sampleRate: 44100,
-                            genParams: WaveformGenParams(type: type, frequency: 440));
-                        _showGenerator = false;
-                      });
-                    },
-                  ),
-                _buildTransportBar(cs),
-              ],
-            ),
+            if (_showGenerator)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: GeneratorPanel(
+                  onGenerate: (samples, type) {
+                    _safeSetState(() {
+                      _clip = AudioClip(samples: samples, sampleRate: 44100,
+                          genParams: WaveformGenParams(type: type, frequency: 440));
+                      _showGenerator = false;
+                    });
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

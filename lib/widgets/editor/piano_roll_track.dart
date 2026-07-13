@@ -53,6 +53,7 @@ class PianoRollTrack extends StatelessWidget {
                   gridColor: cs.outlineVariant.withAlpha(51),
                   beatColor: cs.outlineVariant.withAlpha(102),
                   bgColor: Colors.transparent,
+                  pps: pixelsPerSecond,
                 ),
               ),
             ),
@@ -95,6 +96,7 @@ class _MiniNotePainter extends CustomPainter {
   final Color gridColor;
   final Color beatColor;
   final Color bgColor;
+  final double pps;
 
   _MiniNotePainter({
     required this.notes,
@@ -105,6 +107,7 @@ class _MiniNotePainter extends CustomPainter {
     required this.gridColor,
     required this.beatColor,
     required this.bgColor,
+    this.pps = 50,
   });
 
   @override
@@ -113,7 +116,7 @@ class _MiniNotePainter extends CustomPainter {
 
     final noteCount = maxNote - minNote + 1;
     final rowH = size.height / noteCount;
-    final scaleX = size.width / duration;
+    final scaleX = pps;
 
     // --- Grid lines (every 8 notes = every octave) ---
     final gridPaint = Paint()..strokeWidth = 0.5;
@@ -128,7 +131,8 @@ class _MiniNotePainter extends CustomPainter {
 
     // --- Beat markers ---
     final beatPaint = Paint()..strokeWidth = 0.5..color = beatColor;
-    for (double t = 0; t < duration; t += 0.5) {
+    final drawDuration = math.min(duration, size.width / scaleX);
+    for (double t = 0; t < drawDuration; t += 0.5) {
       final x = t * scaleX;
       if (x > size.width) break;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), beatPaint);

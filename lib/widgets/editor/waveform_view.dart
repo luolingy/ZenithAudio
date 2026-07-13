@@ -6,16 +6,20 @@ import '../../models/track.dart';
 class WaveformView extends StatelessWidget {
   final Track track;
   final double pixelsPerSecond;
+  final VoidCallback? onTap;
 
   const WaveformView({
     super.key,
     required this.track,
     this.pixelsPerSecond = 50,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: Theme.of(context).dividerColor.withAlpha(77)),
@@ -29,6 +33,7 @@ class WaveformView extends StatelessWidget {
           emptyColor: context.outline,
           pixelsPerSecond: pixelsPerSecond,
         ),
+      ),
       ),
     );
   }

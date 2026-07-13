@@ -22,6 +22,7 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
   String? _selectedId;
   String? _previewingId;
   Player? _previewPlayer;
+  bool _previewDisposed = false;
   final _synth = SynthService();
   final Map<String, Uint8List> _previewCache = {};
 
@@ -69,6 +70,7 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
 
     final player = Player();
     _previewPlayer = player;
+    _previewDisposed = false;
     if (mounted) setState(() => _previewingId = id);
 
     // Auto-stop on completion
@@ -90,9 +92,11 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
   }
 
   void _onPreviewEnd(String id, Player player, String filePath) {
+    if (_previewDisposed && _previewPlayer != player) return;
     if (mounted && _previewingId == id) {
       setState(() => _previewingId = null);
     }
+    _previewDisposed = true;
     player.dispose();
     if (_previewPlayer == player) _previewPlayer = null;
     try { File(filePath).delete(); } catch (_) {}

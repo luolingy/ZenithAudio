@@ -7,6 +7,7 @@ import '../core/utils/theme_colors.dart';
 import '../core/utils/responsive_utils.dart';
 import '../core/utils/platform_utils.dart';
 import '../providers/settings_provider.dart';
+import '../providers/project_provider.dart';
 
 enum SettingsTab { general, playback, pianoRoll, about }
 
@@ -292,6 +293,59 @@ class _GeneralContent extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 24),
+        const SizedBox(height: 24),
+        // Auto-Save
+        Text('自动保存', style: TextStyle(
+          color: context.outline, fontSize: 10,
+          fontWeight: FontWeight.w600, letterSpacing: 1,
+        )),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          title: const Text('启用自动保存'),
+          subtitle: const Text('按设定的时间间隔自动保存项目到缓存'),
+          value: settings.autoSaveEnabled,
+          onChanged: (v) {
+            ref.read(settingsProvider.notifier).setAutoSaveEnabled(v);
+            if (v) {
+              ref.read(projectProvider.notifier).startAutoSave();
+            } else {
+              ref.read(projectProvider.notifier).stopAutoSave();
+            }
+          },
+        ),
+        if (settings.autoSaveEnabled) ...[
+          const SizedBox(height: 8),
+          Text('保存间隔', style: TextStyle(
+            color: context.outline, fontSize: 10,
+            fontWeight: FontWeight.w600, letterSpacing: 1,
+          )),
+          const SizedBox(height: 8),
+          InputDecorator(
+            decoration: InputDecoration(
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                value: settings.autoSaveIntervalMinutes,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('1 分钟')),
+                  DropdownMenuItem(value: 5, child: Text('5 分钟')),
+                  DropdownMenuItem(value: 15, child: Text('15 分钟')),
+                  DropdownMenuItem(value: 30, child: Text('30 分钟')),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(settingsProvider.notifier).setAutoSaveIntervalMinutes(v);
+                    ref.read(projectProvider.notifier).startAutoSave();
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         // Language
         Text('settings.language'.tr(), style: TextStyle(

@@ -7,6 +7,7 @@ import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../services/file_service.dart';
+import '../../services/audio_converter.dart';
 import '../../screens/settings_page.dart';
 import '../../screens/about_dialog.dart' as app;
 import '../../core/utils/logger.dart';
@@ -98,11 +99,26 @@ class AudioMenuBar extends ConsumerWidget {
                   final fileService = FileService();
                   final result = await fileService.pickAudioFile();
                   if (result != null && context.mounted) {
+                    String? audioPath = result.audioSource;
+                    if (!isWavFile(audioPath)) {
+                      audioPath = await convertToWav(audioPath);
+                      if (audioPath == null) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('仅支持 WAV 格式。如需导入其他格式，请先转换为 WAV。'),
+                              duration: const Duration(seconds: 5),
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                    }
                     final trackIndex = ref.read(projectProvider).tracks.length + 1;
                     final name = 'track.defaultName'.tr(namedArgs: {'n': '$trackIndex'});
                     ref.read(projectProvider.notifier).addTrack(
                           name: name,
-                          audioFilePath: result.audioSource,
+                          audioFilePath: audioPath,
                         );
                     AppLogger.i('Imported audio: ${result.name}');
                   }

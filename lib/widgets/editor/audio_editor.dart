@@ -16,6 +16,7 @@ import 'track_panel.dart';
 import 'waveform_view.dart';
 import 'piano_roll_track.dart';
 import 'piano_roll_editor.dart';
+import 'audio_clip_editor.dart';
 import '../../models/track.dart';
 
 class AudioEditor extends ConsumerStatefulWidget {
@@ -257,6 +258,7 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                                 return WaveformView(
                                                   track: tr,
                                                   pixelsPerSecond: pps,
+                                                  onTap: () => openAudioClipEditor(context, tr.id),
                                                 );
                                               },
                                             ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:html' as html;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/track.dart';
+import '../models/instrument.dart';
 import '../core/utils/logger.dart';
 
 final audioServiceProvider = Provider<AudioService>((ref) {
@@ -12,6 +13,7 @@ final audioServiceProvider = Provider<AudioService>((ref) {
 
 class AudioService {
   final Map<String, _TrackPlayer> _players = {};
+  final Map<String, String> _cachedPaths = {};
   bool _isPlaying = false;
   double _masterVolume = 1.0;
 
@@ -66,17 +68,65 @@ class AudioService {
     }
   }
 
-  void updateTrackVolume(String trackId, double volume) {
+  Future<void> loadTrackFromPath(String trackId, String path,
+      {double volume = 1.0, bool muted = false}) async {
+    unloadTrack(trackId);
+    try {
+      final element = html.AudioElement()
+        ..src = path
+        ..preload = 'auto'
+        ..volume = muted ? 0 : (volume * _masterVolume).toDouble();
+
+      await element.onCanPlayThrough.first;
+      final tp = _TrackPlayer(element: element, volume: volume);
+
+      tp.positionSub = element.onTimeUpdate.listen((_) {
+        onPositionChanged?.call(element.currentTime.toDouble());
+      });
+      tp.endedSub = element.onEnded.listen((_) {
+        _players.remove(trackId);
+        if (_players.isEmpty) {
+          _isPlaying = false;
+          onCompleted?.call();
+        }
+      });
+
+      _players[trackId] = tp;
+    } catch (e) {
+      AppLogger.e('loadTrackFromPath failed: $e');
+    }
+  }
+
+  Future<String?> prepareInstrumentTrack(Track track,
+      {bool useIsolate = false}) async {
+    if (track.type == TrackType.audio) return track.audioFilePath;
+    if (track.instrumentName == null || track.notes.isEmpty) return null;
+    return _cachedPaths[track.id]; // Web: no offline WAV gen
+  }
+
+  Stream<double> prepareTracks(List<Track> tracks,
+      {String? skipTrackId, bool useIsolate = false}) async* {
+    yield 1.0;
+  }
+
+  void setMute(String trackId, bool muted) {
     final tp = _players[trackId];
     if (tp != null) {
-      tp.volume = volume;
-      tp.element.volume = (volume * _masterVolume).toDouble();
+      tp.element.volume = muted ? 0 : (tp.volume * _masterVolume).toDouble();
     }
   }
 
   void setPlaybackSpeed(double speed) {
     for (final p in _players.values) {
       p.element.playbackRate = speed;
+    }
+  }
+
+  void updateTrackVolume(String trackId, double volume) {
+    final tp = _players[trackId];
+    if (tp != null) {
+      tp.volume = volume;
+      tp.element.volume = (volume * _masterVolume).toDouble();
     }
   }
 
@@ -116,7 +166,7 @@ class AudioService {
     }
   }
 
-  void unloadTrack(String trackId) {
+  Future<void> unloadTrack(String trackId) async {
     final tp = _players.remove(trackId);
     if (tp != null) {
       tp.positionSub?.cancel();
@@ -127,7 +177,7 @@ class AudioService {
     }
   }
 
-  void unloadAll() {
+  Future<void> unloadAll() async {
     for (final p in _players.values) {
       p.positionSub?.cancel();
       p.endedSub?.cancel();
@@ -137,6 +187,13 @@ class AudioService {
     }
     _players.clear();
     _isPlaying = false;
+  }
+
+  String? getCachedTrackPath(String trackId) => _cachedPaths[trackId];
+
+  bool isTrackCached(Track track) {
+    if (track.type == TrackType.audio) return track.audioFilePath != null;
+    return _cachedPaths.containsKey(track.id);
   }
 
   void dispose() {
