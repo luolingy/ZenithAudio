@@ -24,6 +24,8 @@ import 'waveform_cards.dart';
 import 'effect_dialog.dart';
 import 'frequency_split_dialog.dart';
 import 'audio_clip_toolbar.dart';
+import '../../models/waveform_drop_data.dart';
+import '../../services/waveform_generator.dart';
 
 /// Open the audio clip editor for a given track.
 /// Desktop: full-screen dialog. Mobile: Navigator push.
@@ -118,6 +120,14 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   bool _showGenerator = false;
 
   bool _showSpectrogram = false;
+
+  // Pending waveform drop settings
+  WaveformDropData? _pendingDropData;
+  bool _showDropSettings = false;
+  double _dropFrequency = 440;
+  double _dropDuration = 2.0;
+  double _dropAmplitude = 0.8;
+  double _dropMixLevel = 0.5;
 
   // AudioClip-level undo/redo
   static const int _maxUndo = 30;
@@ -387,6 +397,10 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
 
   void _onWaveformTap(TapUpDetails details) {
     if (_clip == null) return;
+    if (_showDropSettings) {
+      _applyDropSettings();
+      return;
+    }
     final sec = (details.localPosition.dx + _hScrollCtrl.offset) / _pps;
     _safeSetState(() => _playheadSec = sec.clamp(0, _clip!.duration));
   }
@@ -522,6 +536,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
               ),
             ),
           ),
+          if (_showDropSettings) _buildDropSettingsPanel(cs),
           if (_clip != null) _buildTransportBar(cs),
         ],
       ),
@@ -572,7 +587,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
 
   Widget _buildWaveformArea(ColorScheme cs) {
     if (_clip == null) return const SizedBox();
-    return DragTarget<Float64List>(
+    return DragTarget<WaveformDropData>(
       onAcceptWithDetails: (details) => _onWaveformDropped(details.data),
       builder: (context, candidateData, rejectedData) {
         final isDragOver = candidateData.isNotEmpty;
@@ -586,6 +601,13 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
                 _safeSetState(() {
                   _zoom = (_zoom * (event.scrollDelta.dy < 0 ? 1.15 : 0.85)).clamp(0.5, 10.0);
                 });
+              } else {
+                final delta = -event.scrollDelta.dy;
+                if (delta != 0 && _hScrollCtrl.hasClients) {
+                  _hScrollCtrl.jumpTo(
+                    (_hScrollCtrl.offset + delta).clamp(0.0, _hScrollCtrl.position.maxScrollExtent),
+                  );
+                }
               }
             }
           },
@@ -633,17 +655,35 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     );
   }
 
-  void _onWaveformDropped(Float64List samples) {
+  void _onWaveformDropped(WaveformDropData data) {
     if (_clip == null) return;
+    _safeSetState(() {
+      _pendingDropData = data;
+      _dropFrequency = data.frequency;
+      _dropDuration = data.duration;
+      _dropAmplitude = data.amplitude;
+      _dropMixLevel = 0.5;
+      _showDropSettings = true;
+    });
+  }
+
+  void _applyDropSettings() {
+    if (_clip == null || _pendingDropData == null) return;
     _pushSampleUndo();
+    final data = _pendingDropData!;
+    final samples = _generateDropWaveform(data);
     final insertSample = (_playheadSec * _clip!.sampleRate).round().clamp(0, _clip!.samples.length);
     final endSample = (insertSample + samples.length).clamp(0, _clip!.samples.length);
     final mixLen = endSample - insertSample;
-    if (mixLen <= 0) return;
+    if (mixLen <= 0) {
+      _safeSetState(() => _showDropSettings = false);
+      return;
+    }
 
     final newSamples = Float64List.fromList(_clip!.samples);
+    final mix = _dropMixLevel.clamp(0.0, 1.0);
     for (int i = 0; i < mixLen && i < samples.length; i++) {
-      newSamples[insertSample + i] = (newSamples[insertSample + i] + samples[i] * 0.5).clamp(-1.0, 1.0);
+      newSamples[insertSample + i] = (newSamples[insertSample + i] * (1 - mix) + samples[i] * mix).clamp(-1.0, 1.0);
     }
     _safeSetState(() {
       _clip = AudioClip(
@@ -652,11 +692,41 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
         sourceFile: _clip!.sourceFile,
         genParams: _clip!.genParams,
       );
+      _showDropSettings = false;
+      _pendingDropData = null;
     });
   }
 
+  void _cancelDropSettings() {
+    _safeSetState(() {
+      _showDropSettings = false;
+      _pendingDropData = null;
+    });
+  }
+
+  Float64List _generateDropWaveform(WaveformDropData data) {
+    switch (data.type) {
+      case 'sine':
+        return WaveformGenerator.sine(_dropFrequency, _dropDuration, amplitude: _dropAmplitude);
+      case 'square':
+        return WaveformGenerator.square(_dropFrequency, _dropDuration, amplitude: _dropAmplitude, dutyCycle: data.dutyCycle);
+      case 'sawtooth':
+        return WaveformGenerator.sawtooth(_dropFrequency, _dropDuration, amplitude: _dropAmplitude);
+      case 'triangle':
+        return WaveformGenerator.triangle(_dropFrequency, _dropDuration, amplitude: _dropAmplitude);
+      case 'whiteNoise':
+        return WaveformGenerator.whiteNoise(_dropDuration, amplitude: _dropAmplitude);
+      case 'pinkNoise':
+        return WaveformGenerator.pinkNoise(_dropDuration, amplitude: _dropAmplitude);
+      case 'brownNoise':
+        return WaveformGenerator.brownNoise(_dropDuration, amplitude: _dropAmplitude);
+      default:
+        return WaveformGenerator.sine(_dropFrequency, _dropDuration, amplitude: _dropAmplitude);
+    }
+  }
+
   Widget _buildWaveformCards(ColorScheme cs) {
-    return WaveformCards(onWaveformDropped: _onWaveformDropped);
+    return WaveformCards(onWaveformDropped: (data) => _onWaveformDropped(data));
   }
 
   Widget _buildTransportBar(ColorScheme cs) {
@@ -713,6 +783,96 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDropSettingsPanel(ColorScheme cs) {
+    final data = _pendingDropData;
+    if (data == null) return const SizedBox();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          top: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Drop Settings — ${data.type}',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              const Spacer(),
+              Text('Mix: ${(_dropMixLevel * 100).round()}%',
+                  style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (!data.isNoiseType)
+            _buildDropSlider('Frequency', _dropFrequency, 20, 20000, true,
+                '${_dropFrequency.round()} Hz', (v) => _dropFrequency = v),
+          _buildDropSlider('Duration', _dropDuration, 0.1, 30, false,
+              '${_dropDuration.toStringAsFixed(1)}s', (v) => _dropDuration = v),
+          _buildDropSlider('Amplitude', _dropAmplitude, 0, 1, false,
+              '${(_dropAmplitude * 100).round()}%', (v) => _dropAmplitude = v),
+          _buildDropSlider('Mix Level', _dropMixLevel, 0, 1, false,
+              '${(_dropMixLevel * 100).round()}%', (v) => _dropMixLevel = v),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                icon: const Icon(Icons.close, size: 14),
+                label: const Text('Cancel', style: TextStyle(fontSize: 11)),
+                onPressed: _cancelDropSettings,
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                icon: const Icon(Icons.check, size: 14),
+                label: const Text('Apply', style: TextStyle(fontSize: 11)),
+                onPressed: _applyDropSettings,
+                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDropSlider(String label, double value, double min, double max, bool logarithmic,
+      String display, ValueChanged<double> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(width: 56, child: Text(label, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant))),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              ),
+              child: Slider(
+                value: logarithmic
+                    ? (log(value / min) / log(max / min)).clamp(0.0, 1.0)
+                    : ((value - min) / (max - min)).clamp(0.0, 1.0),
+                onChanged: (v) {
+                  final real = logarithmic
+                      ? min * pow(max / min, v)
+                      : min + (max - min) * v;
+                  _safeSetState(() => onChanged(real.clamp(min, max)));
+                },
+              ),
+            ),
+          ),
+          SizedBox(width: 50, child: Text(display, style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.onSurface))),
         ],
       ),
     );

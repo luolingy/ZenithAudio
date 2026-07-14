@@ -1,21 +1,20 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import '../../services/waveform_generator.dart';
+import '../../models/waveform_drop_data.dart';
 
 class _WaveformCardData {
   final String label;
   final IconData icon;
-  final Float64List Function() generator;
+  final WaveformDropData dropData;
 
   const _WaveformCardData({
     required this.label,
     required this.icon,
-    required this.generator,
+    required this.dropData,
   });
 }
 
 class WaveformCards extends StatelessWidget {
-  final void Function(Float64List samples) onWaveformDropped;
+  final void Function(WaveformDropData data) onWaveformDropped;
 
   const WaveformCards({super.key, required this.onWaveformDropped});
 
@@ -23,37 +22,37 @@ class WaveformCards extends StatelessWidget {
     _WaveformCardData(
       label: 'Sine',
       icon: Icons.waves,
-      generator: () => WaveformGenerator.sine(440, 2.0, amplitude: 0.8),
+      dropData: const WaveformDropData(type: 'sine', frequency: 440, duration: 2, amplitude: 0.8),
     ),
     _WaveformCardData(
       label: 'Square',
       icon: Icons.show_chart,
-      generator: () => WaveformGenerator.square(440, 2.0, amplitude: 0.8),
+      dropData: const WaveformDropData(type: 'square', frequency: 440, duration: 2, amplitude: 0.8, dutyCycle: 0.5),
     ),
     _WaveformCardData(
       label: 'Sawtooth',
       icon: Icons.show_chart,
-      generator: () => WaveformGenerator.sawtooth(440, 2.0, amplitude: 0.8),
+      dropData: const WaveformDropData(type: 'sawtooth', frequency: 440, duration: 2, amplitude: 0.8),
     ),
     _WaveformCardData(
       label: 'Triangle',
       icon: Icons.show_chart,
-      generator: () => WaveformGenerator.triangle(440, 2.0, amplitude: 0.8),
+      dropData: const WaveformDropData(type: 'triangle', frequency: 440, duration: 2, amplitude: 0.8),
     ),
     _WaveformCardData(
       label: 'White\nNoise',
       icon: Icons.graphic_eq,
-      generator: () => WaveformGenerator.whiteNoise(2.0, amplitude: 0.6),
+      dropData: const WaveformDropData(type: 'whiteNoise', duration: 2, amplitude: 0.6),
     ),
     _WaveformCardData(
       label: 'Pink\nNoise',
       icon: Icons.graphic_eq,
-      generator: () => WaveformGenerator.pinkNoise(2.0, amplitude: 0.6),
+      dropData: const WaveformDropData(type: 'pinkNoise', duration: 2, amplitude: 0.6),
     ),
     _WaveformCardData(
       label: 'Brown\nNoise',
       icon: Icons.graphic_eq,
-      generator: () => WaveformGenerator.brownNoise(2.0, amplitude: 0.6),
+      dropData: const WaveformDropData(type: 'brownNoise', duration: 2, amplitude: 0.6),
     ),
   ];
 
@@ -99,7 +98,7 @@ class WaveformCards extends StatelessWidget {
 
 class _WaveformCard extends StatelessWidget {
   final _WaveformCardData card;
-  final void Function(Float64List samples) onWaveformDropped;
+  final void Function(WaveformDropData data) onWaveformDropped;
 
   const _WaveformCard({
     required this.card,
@@ -131,8 +130,8 @@ class _WaveformCard extends StatelessWidget {
       ),
     );
 
-    return Draggable<Float64List>(
-      data: card.generator(),
+    return Draggable<WaveformDropData>(
+      data: card.dropData,
       feedback: Material(
         elevation: 6,
         borderRadius: BorderRadius.circular(8),
