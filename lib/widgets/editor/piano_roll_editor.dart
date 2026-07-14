@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart' hide Track;
 import 'package:path_provider/path_provider.dart';
 import '../../models/track.dart';
 import '../../models/note.dart';
@@ -15,7 +15,8 @@ import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/synth_service.dart';
-import '../../core/utils/logger.dart';
+import '../../services/audio_service.dart';
+import '../../core/constants/app_constants.dart';
 
 enum ViewportMode { edit, select, scroll }
 
@@ -44,6 +45,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   final ScrollController _keyVScrollCtrl = ScrollController();
   final ScrollController _gridVScrollCtrl = ScrollController();
   bool _isSyncing = false;
+
+  static bool _isMobilePlatform() =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   static const int _minNote = 12;
   static const int _maxNote = 108;
@@ -76,8 +80,8 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   bool _isCtrlDown = false;
 
   // Note preview (keyboard tap → short sound)
-  Player? _notePreviewPlayer;
   final _synth = SynthService();
+  String? _previewTrackId;
 
   // Guard
   bool _disposed = false;
@@ -92,8 +96,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
   @override
   void dispose() {
     _disposed = true;
-    _notePreviewPlayer?.stop();
-    _notePreviewPlayer?.dispose();
+    _stopPreview();
     _keyVScrollCtrl.removeListener(_syncKeyToGrid);
     _gridVScrollCtrl.removeListener(_syncGridToKey);
     _hScrollCtrl.dispose();
@@ -393,6 +396,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                     ? (isTonic ? cs.primary.withAlpha(14) : Colors.transparent)
                     : cs.outlineVariant.withAlpha(10);
               }
+              final noteLabels = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+              final isNatural = !isBlack;
+              final label = noteLabels[pitch % 12];
               return GestureDetector(
                 onTap: hasInstrument ? () => _previewNote(pitch) : null,
                 child: Container(
@@ -405,10 +411,10 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                   ),
                   alignment: Alignment.centerRight,
                   padding: const EdgeInsets.only(right: 4),
-                  child: isC
-                      ? Text('C${(pitch ~/ 12) - 1}',
-                          style: TextStyle(fontSize: 8, color: cs.onSurfaceVariant))
-                      : null,
+                  child: Text(
+                    isNatural ? '$label${(pitch ~/ 12) - 1}' : '',
+                    style: TextStyle(fontSize: 7, color: cs.onSurfaceVariant.withAlpha(isC ? 255 : 153)),
+                  ),
                 ),
               );
             }),
@@ -427,37 +433,26 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final dir = await getTemporaryDirectory();
     if (_disposed) return;
     final ts = DateTime.now().millisecondsSinceEpoch;
+    final previewId = '__preview_${widget.trackId}_$ts';
     final filePath = '${dir.path}/note_preview_$ts.wav';
     await File(filePath).writeAsBytes(wav);
     if (_disposed) return;
 
-    _notePreviewPlayer?.stop();
-    _notePreviewPlayer?.dispose();
-    final player = Player();
-    _notePreviewPlayer = player;
-
-    player.stream.completed.listen((_) {
-      if (!_disposed && _notePreviewPlayer == player) {
-        _notePreviewPlayer = null;
-      }
-      player.dispose();
+    _stopPreview();
+    final audio = ref.read(audioServiceProvider);
+    await audio.loadTrackFromPath(previewId, filePath, volume: 1.0);
+    if (_disposed) return;
+    _previewTrackId = previewId;
+    await audio.playSingleTrack(previewId);
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!_disposed) _stopPreview();
     });
-    player.stream.error.listen((e) {
-      if (!_disposed && _notePreviewPlayer == player) {
-        _notePreviewPlayer = null;
-      }
-      player.dispose();
-    });
+  }
 
-    try {
-      await player.open(Media(Uri.file(filePath).toString()));
-      if (_disposed) { player.dispose(); return; }
-      await player.setVolume(100);
-      player.play();
-    } catch (e, st) {
-      AppLogger.e('Preview note playback failed', e, st);
-      player.dispose();
-      if (!_disposed && _notePreviewPlayer == player) _notePreviewPlayer = null;
+  void _stopPreview() {
+    if (_previewTrackId != null) {
+      ref.read(audioServiceProvider).stopAndUnloadTrack(_previewTrackId!);
+      _previewTrackId = null;
     }
   }
 
@@ -467,6 +462,11 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     final totalTime = max(project.duration, 30.0);
     final totalWidth = totalTime * _pps;
     final notes = _localDragNotes ?? track.notes;
+
+    final isMobile = _isMobilePlatform();
+    final verticalPhysics = (isMobile && _viewportMode == ViewportMode.edit)
+        ? const NeverScrollableScrollPhysics()
+        : null;
 
     return Scrollbar(
       controller: _hScrollCtrl,
@@ -479,6 +479,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
             controller: _gridVScrollCtrl,
             child: SingleChildScrollView(
               controller: _gridVScrollCtrl,
+              physics: verticalPhysics ?? const ClampingScrollPhysics(),
               child: Listener(
                 onPointerDown: _onPointerDown,
                 onPointerMove: _onPointerMove,
@@ -500,13 +501,13 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
                       maxNote: _maxNote,
                       beatSec: beatSec,
                       timeSigNum: project.timeSignatureNumerator,
-                      gridColor: cs.outlineVariant.withAlpha(77),
-                      beatColor: cs.outlineVariant.withAlpha(128),
-                      barColor: cs.primary.withAlpha(51),
+                      gridColor: const Color(0xFF2A2A2A),
+                      beatColor: const Color(0xFF3A3A3A),
+                      barColor: const Color(0xFF00AAFF).withAlpha(38),
                       noteColor: track.color,
                       selectedIndices: _selectedIndices,
                       dragNoteIndex: _dragNoteIndex,
-                      accentColor: cs.onSurface,
+                      accentColor: AppColors.accent,
                       ghostRects: _ghostRects,
                       playPos: isPlaying ? playhead : null,
                       playheadColor: cs.primary,
@@ -548,8 +549,9 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
     } else if (_activePointers > 2) {
       _startPan(event.localPosition);
     } else if (_viewportMode == ViewportMode.scroll) {
-      // Single-finger pan in scroll mode
       _startPan(event.localPosition);
+    } else if (_isMobilePlatform() && _activePointers == 1) {
+      // On mobile in edit/select mode, single finger is for notes, not pan
     }
   }
 

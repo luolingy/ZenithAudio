@@ -325,6 +325,23 @@ class AudioService {
     }
   }
 
+  /// Play a single track without affecting other tracks' state.
+  Future<void> playSingleTrack(String trackId) async {
+    final tp = _players[trackId];
+    if (tp != null) {
+      tp.player.play();
+    }
+  }
+
+  /// Stop and unload a single track.
+  Future<void> stopAndUnloadTrack(String trackId) async {
+    final tp = _players[trackId];
+    if (tp != null) {
+      tp.player.stop();
+    }
+    await unloadTrack(trackId);
+  }
+
   Future<void> pause() async {
     _isPlaying = false;
     for (final tp in _players.values) {

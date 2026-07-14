@@ -35,8 +35,34 @@ class AppTheme {
     return _buildTheme(cs, Brightness.dark);
   }
 
-  // ── Light theme (minimal, FL Studio doesn"t really do light) ──
-  static ThemeData get lightTheme => darkTheme;
+  // ── Light theme ──
+  static ThemeData get lightTheme {
+    final cs = ColorScheme.fromSeed(
+      seedColor: _seed,
+      brightness: Brightness.light,
+    ).copyWith(
+      primary: const Color(0xFF0088DD),
+      onPrimary: const Color(0xFFFFFFFF),
+      primaryContainer: const Color(0xFFCCE5FF),
+      onPrimaryContainer: const Color(0xFF001D33),
+      secondary: const Color(0xFFFF7700),
+      onSecondary: const Color(0xFFFFFFFF),
+      surface: const Color(0xFFF8F9FA),
+      surfaceContainerLowest: const Color(0xFFFFFFFF),
+      surfaceContainerLow: const Color(0xFFF0F1F3),
+      surfaceContainer: const Color(0xFFE8EAED),
+      surfaceContainerHigh: const Color(0xFFDEE0E4),
+      surfaceContainerHighest: const Color(0xFFD0D3D9),
+      onSurface: const Color(0xFF1A1C1E),
+      onSurfaceVariant: const Color(0xFF44474F),
+      outline: const Color(0xFF74777F),
+      outlineVariant: const Color(0xFFC4C6D0),
+      error: const Color(0xFFD32F2F),
+      shadow: const Color(0xFF000000),
+      scrim: const Color(0xFF000000),
+    );
+    return _buildTheme(cs, Brightness.light);
+  }
 
   static ThemeData _buildTheme(ColorScheme cs, Brightness brightness) {
     final isDark = brightness == Brightness.dark;

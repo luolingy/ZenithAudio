@@ -8,6 +8,7 @@ import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/browser_provider.dart';
 import '../../services/file_service.dart';
 import '../../services/audio_converter.dart';
 import '../../screens/settings_page.dart';
@@ -179,7 +180,29 @@ class AudioToolBar extends ConsumerWidget {
                 );
               },
             ),
+            _TbBtn(
+              icon: Icons.settings_input_component,
+              tooltip: 'Add Synth',
+              iconSize: 14,
+              onTap: () {
+                final idx = ref.read(projectProvider).tracks.length + 1;
+                ref.read(projectProvider.notifier).addInstrumentTrack(
+                  name: 'Track $idx', instrumentName: 'synth',
+                );
+              },
+            ),
           ],
+          _TbBtn(
+            icon: ref.watch(browserVisibilityProvider)
+                ? Icons.folder_rounded
+                : Icons.folder_outlined,
+            tooltip: 'Browser',
+            iconSize: 14,
+            onTap: () {
+              final v = ref.read(browserVisibilityProvider.notifier);
+              v.state = !v.state;
+            },
+          ),
           _TbBtn(
             icon: Icons.tune_outlined,
             tooltip: 'Project Settings',

@@ -145,6 +145,22 @@ class AudioService {
     }
   }
 
+  Future<void> playSingleTrack(String trackId) async {
+    final p = _players[trackId];
+    if (p != null) {
+      await p.element.play();
+    }
+  }
+
+  Future<void> stopAndUnloadTrack(String trackId) async {
+    final p = _players[trackId];
+    if (p != null) {
+      p.element.pause();
+      p.element.currentTime = 0;
+    }
+    await unloadTrack(trackId);
+  }
+
   Future<void> pause() async {
     _isPlaying = false;
     for (final p in _players.values) {

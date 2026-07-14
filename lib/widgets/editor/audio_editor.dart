@@ -14,6 +14,7 @@ import '../toolbar/menu_bar.dart';
 import '../toolbar/tool_bar.dart';
 import '../layout/floating_window.dart';
 import '../mixer/mixer_panel.dart';
+import '../browser/browser_panel.dart';
 import 'timeline_ruler.dart';
 import 'track_panel.dart';
 import 'waveform_view.dart';
@@ -254,6 +255,8 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                     duration: project.duration > 0 ? project.duration : 60,
                                     pixelsPerSecond: pps,
                                     currentPosition: playhead,
+                                    bpm: project.bpm,
+                                    timeSignatureNumerator: project.timeSignatureNumerator,
                                     onSeek: (sec) =>
                                         ref.read(playbackProvider.notifier).seekTo(sec),
                                   ),
@@ -265,6 +268,7 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                         Expanded(
                           child: Row(
                             children: [
+                              const BrowserPanel(),
                               const TrackPanel(),
                               Expanded(
                                 child: ClipRect(
