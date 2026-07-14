@@ -8,9 +8,12 @@ import '../../core/utils/responsive_utils.dart';
 import '../../core/utils/theme_colors.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
+import '../../providers/settings_provider.dart';
+import '../../providers/floating_window_provider.dart';
 import '../toolbar/menu_bar.dart';
 import '../toolbar/tool_bar.dart';
 import '../controls/transport_bar.dart';
+import '../layout/floating_window.dart';
 import 'timeline_ruler.dart';
 import 'track_panel.dart';
 import 'waveform_view.dart';
@@ -160,6 +163,42 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
     setState(() => _userInteracted = false);
   }
 
+  void _openAudioClipEditor(BuildContext context, String trackId) {
+    final settings = ref.read(settingsProvider);
+    if (settings.editorMode == 'float') {
+      final track = ref.read(projectProvider).tracks.firstWhere((t) => t.id == trackId);
+      ref.read(floatingWindowProvider.notifier).open(
+        title: 'Audio: ${track.name}',
+        builder: (_) => AudioClipEditor(
+          trackId: trackId,
+          isFloating: true,
+        ),
+      );
+    } else {
+      openAudioClipEditor(context, trackId);
+    }
+  }
+
+  void _openPianoRoll(String trackId) {
+    final settings = ref.read(settingsProvider);
+    if (settings.editorMode == 'float') {
+      final track = ref.read(projectProvider).tracks.firstWhere((t) => t.id == trackId);
+      ref.read(floatingWindowProvider.notifier).open(
+        title: 'Piano Roll: ${track.name}',
+        builder: (_) => PianoRollEditor(
+          trackId: trackId,
+          isFloating: true,
+        ),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PianoRollEditor(trackId: trackId),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(projectProvider);
@@ -191,134 +230,150 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
       child: Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            if (screenSize != ScreenSize.mobile) const AudioMenuBar(),
-            const AudioToolBar(),
-            Expanded(
-              child: Listener(
-                onPointerSignal: _onPointerSignal,
-                child: Column(
-                  children: [
-                    Row(
+            Column(
+              children: [
+                if (screenSize != ScreenSize.mobile) const AudioMenuBar(),
+                const AudioToolBar(),
+                Expanded(
+                  child: Listener(
+                    onPointerSignal: _onPointerSignal,
+                    child: Column(
                       children: [
-                        if (screenSize != ScreenSize.mobile)
-                          const SizedBox(width: AppConstants.trackPanelWidth),
-                        Expanded(
-                          child: ClipRect(
-                            child: SingleChildScrollView(
-                              controller: _rulerScrollCtrl,
-                              scrollDirection: Axis.horizontal,
-                              child: TimelineRuler(
-                                duration: project.duration > 0 ? project.duration : 60,
-                                pixelsPerSecond: pps,
-                                currentPosition: playhead,
-                                onSeek: (sec) =>
-                                    ref.read(playbackProvider.notifier).seekTo(sec),
+                        Row(
+                          children: [
+                            if (screenSize != ScreenSize.mobile)
+                              const SizedBox(width: AppConstants.trackPanelWidth),
+                            Expanded(
+                              child: ClipRect(
+                                child: SingleChildScrollView(
+                                  controller: _rulerScrollCtrl,
+                                  scrollDirection: Axis.horizontal,
+                                  child: TimelineRuler(
+                                    duration: project.duration > 0 ? project.duration : 60,
+                                    pixelsPerSecond: pps,
+                                    currentPosition: playhead,
+                                    onSeek: (sec) =>
+                                        ref.read(playbackProvider.notifier).seekTo(sec),
+                                  ),
+                                ),
                               ),
                             ),
+                          ],
+                        ),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              const TrackPanel(),
+                              Expanded(
+                                child: ClipRect(
+                                  child: Stack(
+                                    children: [
+                                      project.tracks.isEmpty
+                                          ? _buildEmptyState(context)
+                                          : SingleChildScrollView(
+                                              controller: _waveformScrollCtrl,
+                                              scrollDirection: Axis.horizontal,
+                                              physics: const ClampingScrollPhysics(),
+                                              child: SizedBox(
+                                                width: totalWidth,
+                                                child: ListView.builder(
+                                                  itemCount: project.tracks.length,
+                                                  itemExtent: AppConstants.trackTileHeight,
+                                                  itemBuilder: (context, index) {
+                                                    final tr = project.tracks[index];
+                                                      if (tr.type == TrackType.instrument) {
+                                                        return PianoRollTrack(
+                                                          track: tr,
+                                                          pixelsPerSecond: pps,
+                                                          onEdit: () => _openPianoRoll(tr.id),
+                                                        );
+                                                      }
+                                                    return WaveformView(
+                                                      track: tr,
+                                                      pixelsPerSecond: pps,
+                                                      onTap: () => _openAudioClipEditor(context, tr.id),
+                                                    );
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                      // Playhead line overlay.
+                                      if (project.tracks.isNotEmpty)
+                                        Positioned(
+                                          left: playhead * pps -
+                                              (_waveformScrollCtrl.hasClients
+                                                  ? _waveformScrollCtrl.offset
+                                                  : 0) -
+                                              1,
+                                          top: 0,
+                                          bottom: 0,
+                                          child: IgnorePointer(
+                                            child: Container(
+                                                width: 2, color: AppColors.playhead),
+                                          ),
+                                        ),
+                                      if (_showBackButton)
+                                        Positioned(
+                                          right: 8,
+                                          top: 8,
+                                          child: Material(
+                                            color: cs.primary,
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              onTap: _scrollToPlayhead,
+                                              child: Container(
+                                                width: 32,
+                                                height: 32,
+                                                alignment: Alignment.center,
+                                                child: Icon(
+                                                  Icons.play_arrow_rounded,
+                                                  size: 18,
+                                                  color: cs.onPrimary,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                    Expanded(
-                      child: Row(
-                        children: [
-                          const TrackPanel(),
-                          Expanded(
-                            child: ClipRect(
-                              child: Stack(
-                                children: [
-                                  project.tracks.isEmpty
-                                      ? _buildEmptyState(context)
-                                      : SingleChildScrollView(
-                                          controller: _waveformScrollCtrl,
-                                          scrollDirection: Axis.horizontal,
-                                          physics: const ClampingScrollPhysics(),
-                                          child: SizedBox(
-                                            width: totalWidth,
-                                            child: ListView.builder(
-                                              itemCount: project.tracks.length,
-                                              itemExtent: AppConstants.trackTileHeight,
-                                              itemBuilder: (context, index) {
-                                                final tr = project.tracks[index];
-                                                  if (tr.type == TrackType.instrument) {
-                                                    return PianoRollTrack(
-                                                      track: tr,
-                                                      pixelsPerSecond: pps,
-                                                      onEdit: () => Navigator.of(context).push(
-                                                        MaterialPageRoute(
-                                                          builder: (_) => PianoRollEditor(
-                                                            trackId: tr.id,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  }
-                                                return WaveformView(
-                                                  track: tr,
-                                                  pixelsPerSecond: pps,
-                                                  onTap: () => openAudioClipEditor(context, tr.id),
-                                                );
-                                              },
-                                            ),
-                                          ),
-                                        ),
-                                  // Playhead line overlay.
-                                  if (project.tracks.isNotEmpty)
-                                    Positioned(
-                                      left: playhead * pps -
-                                          (_waveformScrollCtrl.hasClients
-                                              ? _waveformScrollCtrl.offset
-                                              : 0) -
-                                          1,
-                                      top: 0,
-                                      bottom: 0,
-                                      child: IgnorePointer(
-                                        child: Container(
-                                            width: 2, color: AppColors.playhead),
-                                      ),
-                                    ),
-                                  if (_showBackButton)
-                                    Positioned(
-                                      right: 8,
-                                      top: 8,
-                                      child: Material(
-                                        color: cs.primary,
-                                        borderRadius:
-                                            BorderRadius.circular(20),
-                                        child: InkWell(
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                          onTap: _scrollToPlayhead,
-                                          child: Container(
-                                            width: 32,
-                                            height: 32,
-                                            alignment: Alignment.center,
-                                            child: Icon(
-                                              Icons.play_arrow_rounded,
-                                              size: 18,
-                                              color: cs.onPrimary,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                const TransportBar(),
+              ],
             ),
-            const TransportBar(),
+            // Floating windows overlay
+            ...ref.watch(floatingWindowProvider).map((fw) {
+              final notifier = ref.read(floatingWindowProvider.notifier);
+              return FloatingWindow(
+                key: ValueKey(fw.id),
+                windowId: fw.id,
+                title: fw.title,
+                child: fw.builder(context),
+                initialSize: fw.size,
+                initialPosition: fw.position,
+                isMinimized: fw.isMinimized,
+                onMinimize: () => notifier.toggleMinimize(fw.id),
+                onClose: () => notifier.close(fw.id),
+                onMove: () => notifier.bringToFront(fw.id),
+                onPositionChanged: (pos) => notifier.updatePosition(fw.id, pos),
+                onSizeChanged: (size) => notifier.updateSize(fw.id, size),
+              );
+            }),
           ],
-        ),    // Column
-      ),      // SafeArea
+        ),     // Stack
+      ),       // SafeArea
     ),        // Scaffold
   );          // PopScope + return
   }

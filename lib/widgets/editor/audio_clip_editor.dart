@@ -12,6 +12,7 @@ import '../../models/track.dart';
 
 import '../../providers/project_provider.dart';
 import '../../providers/playback_provider.dart';
+import '../layout/floating_window.dart';
 import '../../services/audio_service.dart';
 import '../../services/audio_converter.dart';
 import '../../services/fft_service.dart';
@@ -90,6 +91,7 @@ class AudioClipEditor extends ConsumerStatefulWidget {
   final Float64List? initialSamples;
   final int? initialSampleRate;
   final String? initialGenType;
+  final bool isFloating;
 
   const AudioClipEditor({
     super.key,
@@ -97,6 +99,7 @@ class AudioClipEditor extends ConsumerStatefulWidget {
     this.initialSamples,
     this.initialSampleRate,
     this.initialGenType,
+    this.isFloating = false,
   });
 
   @override
@@ -118,6 +121,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   double _playheadSec = 0;
   bool _isPlaying = false;
   bool _showGenerator = false;
+  bool _hasUnsavedChanges = false;
 
   bool _showSpectrogram = false;
 
@@ -172,6 +176,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   void dispose() {
     _disposed = true;
     _hScrollCtrl.dispose();
+    _trySave();
     super.dispose();
   }
 
@@ -348,6 +353,27 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     return Uint8List.fromList(data);
   }
 
+  void _trySave() {
+    if (!_hasUnsavedChanges || _clip == null || widget.trackId == null) return;
+    final samples = Float64List.fromList(_clip!.samples);
+    final trackId = widget.trackId!;
+    _saveToWav(samples, prefix: 'track_$trackId').then((path) {
+      ref.read(projectProvider.notifier).setTrackAudioFile(trackId, path);
+    });
+  }
+
+  void _closeEditor() {
+    _trySave();
+    if (widget.isFloating) {
+      final closeFn = FloatingWindowCloseScope.of(context);
+      if (closeFn != null) {
+        closeFn();
+        return;
+      }
+    }
+    Navigator.of(context).pop();
+  }
+
   void _togglePlayback() {
     final notifier = ref.read(playbackProvider.notifier);
     if (_isPlaying) {
@@ -465,7 +491,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
       backgroundColor: cs.surface,
       body: Column(
         children: [
-          _buildTitleBar(cs),
+          if (!widget.isFloating) _buildTitleBar(cs),
           if (_clip != null)
             AudioClipToolbar(
               canUndo: _canUndoSample,
@@ -527,6 +553,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
                             _clip = AudioClip(samples: samples, sampleRate: 44100,
                                 genParams: WaveformGenParams(type: type, frequency: 440));
                             _loadError = null;
+                            _hasUnsavedChanges = true;
                             _showGenerator = false;
                           });
                         },
@@ -557,7 +584,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
         children: [
           IconButton(
             icon: const Icon(Icons.close, size: 18),
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _closeEditor,
             padding: EdgeInsets.zero,
             splashRadius: 16,
             style: IconButton.styleFrom(
@@ -567,6 +594,8 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
           const SizedBox(width: 8),
           Text(
             _track?.name ?? (widget.initialGenType != null ? 'New ${widget.initialGenType}' : 'Audio Editor'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 14),
           ),
           const Spacer(),
@@ -692,6 +721,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
         sourceFile: _clip!.sourceFile,
         genParams: _clip!.genParams,
       );
+      _hasUnsavedChanges = true;
       _showDropSettings = false;
       _pendingDropData = null;
     });
@@ -889,6 +919,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
         _clip!.samples.setAll(0, fn(Float64List.fromList(_clip!.samples)));
         _safeSetState(() {});
       }
+      _hasUnsavedChanges = true;
     }
 
     // Simple no-dialog effects
@@ -913,6 +944,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
 
     _pushSampleUndo();
     _clip!.samples.setAll(0, dialogResult.samples!);
+    _hasUnsavedChanges = true;
     _safeSetState(() {});
   }
 

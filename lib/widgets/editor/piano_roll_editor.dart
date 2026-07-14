@@ -21,8 +21,9 @@ enum ViewportMode { edit, select, scroll }
 
 class PianoRollEditor extends ConsumerStatefulWidget {
   final String trackId;
+  final bool isFloating;
 
-  const PianoRollEditor({super.key, required this.trackId});
+  const PianoRollEditor({super.key, required this.trackId, this.isFloating = false});
 
   @override
   ConsumerState<PianoRollEditor> createState() => _PianoRollEditorState();
@@ -152,7 +153,7 @@ class _PianoRollEditorState extends ConsumerState<PianoRollEditor> {
 
     return Scaffold(
       backgroundColor: cs.surface,
-      appBar: _buildAppBar(context, cs, track, settings),
+      appBar: widget.isFloating ? null : _buildAppBar(context, cs, track, settings),
       body: Focus(
         autofocus: true,
         onKeyEvent: _onKeyEvent,

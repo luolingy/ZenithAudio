@@ -15,6 +15,7 @@ class SettingsState {
   final double gridResolution;
   final bool autoSaveEnabled;
   final int autoSaveIntervalMinutes;
+  final String editorMode;
 
   const SettingsState({
     this.themeMode = ThemeMode.system,
@@ -25,6 +26,7 @@ class SettingsState {
     this.gridResolution = 0.25,
     this.autoSaveEnabled = false,
     this.autoSaveIntervalMinutes = 5,
+    this.editorMode = 'fullscreen',
   });
 
   SettingsState copyWith({
@@ -36,6 +38,7 @@ class SettingsState {
     double? gridResolution,
     bool? autoSaveEnabled,
     int? autoSaveIntervalMinutes,
+    String? editorMode,
   }) {
     return SettingsState(
       themeMode: themeMode ?? this.themeMode,
@@ -46,6 +49,7 @@ class SettingsState {
       gridResolution: gridResolution ?? this.gridResolution,
       autoSaveEnabled: autoSaveEnabled ?? this.autoSaveEnabled,
       autoSaveIntervalMinutes: autoSaveIntervalMinutes ?? this.autoSaveIntervalMinutes,
+      editorMode: editorMode ?? this.editorMode,
     );
   }
 }
@@ -75,6 +79,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
       gridResolution: prefs.getDouble('gridResolution') ?? 0.25,
       autoSaveEnabled: prefs.getBool('autoSaveEnabled') ?? false,
       autoSaveIntervalMinutes: prefs.getInt('autoSaveIntervalMinutes') ?? 5,
+      editorMode: prefs.getString('editorMode') ?? 'fullscreen',
     );
   }
 
@@ -88,6 +93,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
     await prefs.setDouble('gridResolution', state.gridResolution);
     await prefs.setBool('autoSaveEnabled', state.autoSaveEnabled);
     await prefs.setInt('autoSaveIntervalMinutes', state.autoSaveIntervalMinutes);
+    await prefs.setString('editorMode', state.editorMode);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -127,6 +133,11 @@ class SettingsNotifier extends Notifier<SettingsState> {
 
   void setAutoSaveIntervalMinutes(int value) {
     state = state.copyWith(autoSaveIntervalMinutes: value);
+    _persist();
+  }
+
+  void setEditorMode(String mode) {
+    state = state.copyWith(editorMode: mode);
     _persist();
   }
 }

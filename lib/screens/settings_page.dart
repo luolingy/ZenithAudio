@@ -347,6 +347,32 @@ class _GeneralContent extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 24),
+        // Editor Mode
+        Text('编辑器模式', style: TextStyle(
+          color: context.outline, fontSize: 10,
+          fontWeight: FontWeight.w600, letterSpacing: 1,
+        )),
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: settings.editorMode,
+              isExpanded: true,
+              items: const [
+                DropdownMenuItem(value: 'fullscreen', child: Text('全屏编辑')),
+                DropdownMenuItem(value: 'float', child: Text('浮窗编辑')),
+              ],
+              onChanged: (v) {
+                if (v != null) ref.read(settingsProvider.notifier).setEditorMode(v);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
         // Language
         Text('settings.language'.tr(), style: TextStyle(
           color: context.outline, fontSize: 10,

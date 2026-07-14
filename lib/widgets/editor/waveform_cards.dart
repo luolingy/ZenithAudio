@@ -108,6 +108,7 @@ class _WaveformCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final dropData = card.dropData;
 
     final child = Container(
       height: 56,
@@ -131,7 +132,7 @@ class _WaveformCard extends StatelessWidget {
     );
 
     return Draggable<WaveformDropData>(
-      data: card.dropData,
+      data: dropData,
       feedback: Material(
         elevation: 6,
         borderRadius: BorderRadius.circular(8),

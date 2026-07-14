@@ -5,6 +5,8 @@ import '../../core/utils/theme_colors.dart';
 import '../../models/track.dart';
 import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/settings_provider.dart';
+import '../../providers/floating_window_provider.dart';
 import 'piano_roll_editor.dart';
 import 'audio_clip_editor.dart';
 
@@ -32,13 +34,29 @@ class TrackTile extends ConsumerWidget {
     return GestureDetector(
       onTap: () {
         if (track.type == TrackType.instrument) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => PianoRollEditor(trackId: track.id),
-            ),
-          );
+          final settings = ref.read(settingsProvider);
+          if (settings.editorMode == 'float') {
+            ref.read(floatingWindowProvider.notifier).open(
+              title: 'Piano Roll: ${track.name}',
+              builder: (_) => PianoRollEditor(trackId: track.id, isFloating: true),
+            );
+          } else {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PianoRollEditor(trackId: track.id),
+              ),
+            );
+          }
         } else if (track.type == TrackType.audio) {
-          openAudioClipEditor(context, track.id);
+          final settings = ref.read(settingsProvider);
+          if (settings.editorMode == 'float') {
+            ref.read(floatingWindowProvider.notifier).open(
+              title: 'Audio: ${track.name}',
+              builder: (_) => AudioClipEditor(trackId: track.id, isFloating: true),
+            );
+          } else {
+            openAudioClipEditor(context, track.id);
+          }
         }
       },
       onSecondaryTapDown: (details) =>
@@ -195,19 +213,34 @@ class TrackTile extends ConsumerWidget {
           globalPos.dx, globalPos.dy, globalPos.dx + 1, globalPos.dy + 1),
       items: items,
     ).then((value) {
+      final settings = ref.read(settingsProvider);
       switch (value) {
         case 'rename':
           _showRenameDialog(context, ref);
         case 'properties':
           _showPropertiesDialog(context);
         case 'editPianoRoll':
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => PianoRollEditor(trackId: track.id),
-            ),
-          );
+          if (settings.editorMode == 'float') {
+            ref.read(floatingWindowProvider.notifier).open(
+              title: 'Piano Roll: ${track.name}',
+              builder: (_) => PianoRollEditor(trackId: track.id, isFloating: true),
+            );
+          } else {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PianoRollEditor(trackId: track.id),
+              ),
+            );
+          }
         case 'editAudio':
-          openAudioClipEditor(context, track.id);
+          if (settings.editorMode == 'float') {
+            ref.read(floatingWindowProvider.notifier).open(
+              title: 'Audio: ${track.name}',
+              builder: (_) => AudioClipEditor(trackId: track.id, isFloating: true),
+            );
+          } else {
+            openAudioClipEditor(context, track.id);
+          }
         case 'changeInstrument':
           _showChangeInstrumentDialog(context, ref);
         case 'delete':
