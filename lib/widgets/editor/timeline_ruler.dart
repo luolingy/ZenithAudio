@@ -68,7 +68,7 @@ class TimelineRuler extends StatelessWidget {
             ),
           ),
           Positioned(
-            left: currentPosition * pixelsPerSecond - 1,
+            left: currentPosition * pixelsPerSecond,
             top: 0, bottom: 0,
             child: Container(width: 2, color: AppColors.playhead),
           ),

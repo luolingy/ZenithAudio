@@ -245,8 +245,8 @@ class ProjectNotifier extends Notifier<Project> {
         outputPath = _currentFilePath;
       } else {
         try {
-          if (Platform.isAndroid) {
-            // On Android, pass bytes directly so FilePicker writes via ContentResolver
+          if (Platform.isAndroid || Platform.isIOS) {
+            // On Android/iOS, pass bytes directly so FilePicker writes via ContentResolver
             outputPath = await FilePicker.platform.saveFile(
               dialogTitle: 'Save Project',
               fileName: '${state.name}${AppConstants.projectExtension}',
@@ -271,20 +271,23 @@ class ProjectNotifier extends Notifier<Project> {
       if (outputPath == null) return; // User cancelled
 
       if (Platform.isIOS) {
-        // On iOS, saveFile returns a writable sandbox path, fallback to docs
-        try {
-          await File(outputPath).writeAsBytes(bytes);
-        } catch (e) {
-          AppLogger.w('iOS save to picker path failed, using app docs: $e');
-          final dir = await getApplicationDocumentsDirectory();
-          outputPath = '${dir.path}/${state.name}${AppConstants.projectExtension}';
-          await File(outputPath).writeAsBytes(bytes);
+        // On iOS with bytes param, file is already written by the picker.
+        // If the path is somehow unwritable, fall back to app docs.
+        if (!await File(outputPath).exists()) {
+          try {
+            await File(outputPath).writeAsBytes(bytes);
+          } catch (e) {
+            AppLogger.w('iOS save to picker path failed, using app docs: $e');
+            final dir = await getApplicationDocumentsDirectory();
+            outputPath = '${dir.path}/${state.name}${AppConstants.projectExtension}';
+            await File(outputPath).writeAsBytes(bytes);
+          }
         }
       } else if (!Platform.isAndroid) {
         // Desktop: write directly
         await File(outputPath).writeAsBytes(bytes);
       }
-      // On Android with bytes param, file is already written by the picker
+      // On Android/iOS with bytes param, file is already written by the picker
 
       _currentFilePath = outputPath;
       _isDirty = false;

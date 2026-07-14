@@ -305,17 +305,16 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                                             ),
                                       // Playhead line overlay.
                                       if (project.tracks.isNotEmpty)
-                                        Positioned(
-                                          left: playhead * pps -
-                                              (_waveformScrollCtrl.hasClients
-                                                  ? _waveformScrollCtrl.offset
-                                                  : 0) -
-                                              1,
-                                          top: 0,
-                                          bottom: 0,
-                                          child: IgnorePointer(
-                                            child: Container(
-                                                width: 2, color: AppColors.playhead),
+                                      Positioned(
+                                        left: playhead * pps -
+                                            (_waveformScrollCtrl.hasClients
+                                                ? _waveformScrollCtrl.offset
+                                                : 0),
+                                        top: 0,
+                                        bottom: 0,
+                                        child: IgnorePointer(
+                                          child: Container(
+                                              width: 2, color: AppColors.playhead),
                                           ),
                                         ),
                                       if (_showBackButton)

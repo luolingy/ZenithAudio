@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 /// Toolbar for the audio clip editor, styled like [AudioToolBar].
-class AudioClipToolbar extends StatelessWidget {
+class AudioClipToolbar extends StatefulWidget {
   final bool canUndo;
   final bool canRedo;
   final VoidCallback? onUndo;
@@ -36,10 +36,17 @@ class AudioClipToolbar extends StatelessWidget {
   });
 
   @override
+  State<AudioClipToolbar> createState() => _AudioClipToolbarState();
+}
+
+class _AudioClipToolbarState extends State<AudioClipToolbar> {
+  bool _effectsExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
-      height: 40,
+      height: _effectsExpanded ? 72 : 40,
       decoration: BoxDecoration(
         color: cs.surface,
         border: Border(
@@ -49,106 +56,133 @@ class AudioClipToolbar extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Undo / Redo
-            _toolBtn(
-              context,
-              icon: Icons.undo,
-              tooltip: 'audioClip.undo'.tr(),
-              onTap: canUndo ? onUndo : null,
-            ),
-            _toolBtn(
-              context,
-              icon: Icons.redo,
-              tooltip: 'audioClip.redo'.tr(),
-              onTap: canRedo ? onRedo : null,
-            ),
-            _divider(context),
-
-            // Simple one-click effects
-            _toolBtn(
-              context,
-              icon: Icons.vertical_align_center,
-              tooltip: 'audioClip.normalize'.tr(),
-              onTap: () => onProcess('normalize'),
-            ),
-            _toolBtn(
-              context,
-              icon: Icons.replay,
-              tooltip: 'audioClip.reverse'.tr(),
-              onTap: () => onProcess('reverse'),
-            ),
-            _toolBtn(
-              context,
-              icon: Icons.block,
-              tooltip: 'audioClip.removeDc'.tr(),
-              onTap: () => onProcess('removeDc'),
-            ),
-            _toolBtn(
-              context,
-              icon: Icons.flip_to_front,
-              tooltip: 'audioClip.invert'.tr(),
-              onTap: () => onProcess('invert'),
-            ),
-            _divider(context),
-
-            // View toggles
-            _toolBtn(
-              context,
-              icon: showGenerator ? Icons.expand_more : Icons.expand_less,
-              tooltip: 'audioClip.generator'.tr(),
-              onTap: onToggleGenerator,
-            ),
-            _toolBtn(
-              context,
-              icon: showSpectrogram ? Icons.wifi : Icons.wifi_outlined,
-              tooltip: 'audioClip.spectrogram'.tr(),
-              onTap: onToggleSpectrogram,
-            ),
-            _divider(context),
-
-            // Effects
-            _effectButtons(context),
-
-            // Frequency split button
-            _toolBtn(
-              context,
-              icon: Icons.call_split,
-              tooltip: 'audioClip.frequencySplit'.tr(),
-              onTap: onFrequencySplit,
-            ),
-            _divider(context),
-
-            // Zoom
             SizedBox(
-              width: 80,
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                ),
-                child: Slider(
-                  value: zoom,
-                  min: 0.5,
-                  max: 10,
-                  onChanged: onZoomChanged,
-                ),
+              height: 40,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Undo / Redo
+                  _toolBtn(
+                    context,
+                    icon: Icons.undo,
+                    tooltip: 'audioClip.undo'.tr(),
+                    onTap: widget.canUndo ? widget.onUndo : null,
+                  ),
+                  _toolBtn(
+                    context,
+                    icon: Icons.redo,
+                    tooltip: 'audioClip.redo'.tr(),
+                    onTap: widget.canRedo ? widget.onRedo : null,
+                  ),
+                  _divider(context),
+
+                  // Simple one-click effects
+                  _toolBtn(
+                    context,
+                    icon: Icons.vertical_align_center,
+                    tooltip: 'audioClip.normalize'.tr(),
+                    onTap: () => widget.onProcess('normalize'),
+                  ),
+                  _toolBtn(
+                    context,
+                    icon: Icons.replay,
+                    tooltip: 'audioClip.reverse'.tr(),
+                    onTap: () => widget.onProcess('reverse'),
+                  ),
+                  _toolBtn(
+                    context,
+                    icon: Icons.block,
+                    tooltip: 'audioClip.removeDc'.tr(),
+                    onTap: () => widget.onProcess('removeDc'),
+                  ),
+                  _toolBtn(
+                    context,
+                    icon: Icons.flip_to_front,
+                    tooltip: 'audioClip.invert'.tr(),
+                    onTap: () => widget.onProcess('invert'),
+                  ),
+                  _divider(context),
+
+                  // View toggles
+                  _toolBtn(
+                    context,
+                    icon: widget.showGenerator ? Icons.expand_more : Icons.expand_less,
+                    tooltip: 'audioClip.generator'.tr(),
+                    onTap: widget.onToggleGenerator,
+                  ),
+                  _toolBtn(
+                    context,
+                    icon: widget.showSpectrogram ? Icons.wifi : Icons.wifi_outlined,
+                    tooltip: 'audioClip.spectrogram'.tr(),
+                    onTap: widget.onToggleSpectrogram,
+                  ),
+                  _divider(context),
+
+                  // Frequency split button
+                  _toolBtn(
+                    context,
+                    icon: Icons.call_split,
+                    tooltip: 'audioClip.frequencySplit'.tr(),
+                    onTap: widget.onFrequencySplit,
+                  ),
+                  _divider(context),
+
+                  // Zoom
+                  SizedBox(
+                    width: 80,
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 3,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                      ),
+                      child: Slider(
+                        value: widget.zoom,
+                        min: 0.5,
+                        max: 10,
+                        onChanged: widget.onZoomChanged,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Text('${(widget.zoom * 100).round()}%',
+                        style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+                  ),
+                  _divider(context),
+
+                  // Effects expand/collapse toggle
+                  _toolBtn(
+                    context,
+                    icon: _effectsExpanded ? Icons.expand_less : Icons.expand_more,
+                    tooltip: _effectsExpanded ? 'audioClip.effects.hide' : 'audioClip.effects.show',
+                    onTap: () => setState(() => _effectsExpanded = !_effectsExpanded),
+                  ),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Text('${(zoom * 100).round()}%',
-                  style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
-            ),
+            if (_effectsExpanded)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(width: 8),
+                    ..._effectButtons(context),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _effectButtons(BuildContext context) {
+  List<Widget> _effectButtons(BuildContext context) {
     final effects = <_EffectDef>[
       _EffectDef('compressor', Icons.compress, 'audioClip.effect.compressor'),
       _EffectDef('echo', Icons.repeat_one, 'audioClip.effect.echo'),
@@ -167,12 +201,9 @@ class AudioClipToolbar extends StatelessWidget {
       _EffectDef('splitByTime', Icons.call_split, 'audioClip.effect.splitByTime'),
       _EffectDef('mixer', Icons.queue_music, 'audioClip.effect.mixer'),
     ];
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: effects.map((e) {
-        return _effBtn(context, e);
-      }).toList(),
-    );
+    return effects.map((e) {
+      return _effBtn(context, e);
+    }).toList();
   }
 
   Widget _effBtn(BuildContext context, _EffectDef e) {
@@ -184,7 +215,7 @@ class AudioClipToolbar extends StatelessWidget {
           width: 28,
           height: 28,
           child: IconButton(
-            onPressed: () => onProcess(e.action),
+            onPressed: () => widget.onProcess(e.action),
             icon: Icon(e.icon, size: 16),
             padding: EdgeInsets.zero,
             splashRadius: 14,
