@@ -62,6 +62,22 @@ class AudioClip {
 
   double get duration => samples.length / sampleRate;
 
+  AudioClip copyWith({
+    Float64List? samples,
+    int? sampleRate,
+    String? sourceFile,
+    WaveformGenParams? genParams,
+    Selection? selection,
+    bool clearSelection = false,
+  }) =>
+      AudioClip(
+        samples: samples ?? Float64List.fromList(this.samples),
+        sampleRate: sampleRate ?? this.sampleRate,
+        sourceFile: sourceFile ?? this.sourceFile,
+        genParams: genParams ?? this.genParams,
+        selection: clearSelection ? null : (selection ?? this.selection?.copyWith()),
+      );
+
   /// Extract selected region as a new clip.
   AudioClip? get selectedRegion {
     if (selection == null || !selection!.isValid) return null;

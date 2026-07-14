@@ -21,7 +21,9 @@ import 'waveform_painter.dart';
 import 'spectrogram_painter.dart';
 import 'generator_panel.dart';
 import 'waveform_cards.dart';
+import 'effect_dialog.dart';
 import 'frequency_split_dialog.dart';
+import 'audio_clip_toolbar.dart';
 
 /// Open the audio clip editor for a given track.
 /// Desktop: full-screen dialog. Mobile: Navigator push.
@@ -116,6 +118,35 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   bool _showGenerator = false;
 
   bool _showSpectrogram = false;
+
+  // AudioClip-level undo/redo
+  static const int _maxUndo = 30;
+  final List<Float64List> _sampleUndoStack = [];
+  final List<Float64List> _sampleRedoStack = [];
+
+  void _pushSampleUndo() {
+    if (_clip == null) return;
+    _sampleUndoStack.add(Float64List.fromList(_clip!.samples));
+    if (_sampleUndoStack.length > _maxUndo) _sampleUndoStack.removeAt(0);
+    _sampleRedoStack.clear();
+  }
+
+  void _undoSample() {
+    if (_clip == null || _sampleUndoStack.isEmpty) return;
+    _sampleRedoStack.add(Float64List.fromList(_clip!.samples));
+    _clip = _clip!.copyWith(samples: _sampleUndoStack.removeLast());
+    _safeSetState(() {});
+  }
+
+  void _redoSample() {
+    if (_clip == null || _sampleRedoStack.isEmpty) return;
+    _sampleUndoStack.add(Float64List.fromList(_clip!.samples));
+    _clip = _clip!.copyWith(samples: _sampleRedoStack.removeLast());
+    _safeSetState(() {});
+  }
+
+  bool get _canUndoSample => _sampleUndoStack.isNotEmpty;
+  bool get _canRedoSample => _sampleRedoStack.isNotEmpty;
 
   // Selection
   double? _dragStartSec;
@@ -408,8 +439,6 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final isDesktop = defaultTargetPlatform != TargetPlatform.android &&
-        defaultTargetPlatform != TargetPlatform.iOS;
 
     if (_loading) {
       return Scaffold(
@@ -420,132 +449,124 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
 
     return Scaffold(
       backgroundColor: cs.surface,
-      appBar: _buildAppBar(cs, isDesktop),
-      body: ClipRect(
-        child: Stack(
-          children: [
-            if (_clip != null)
-              Column(
+      body: Column(
+        children: [
+          _buildTitleBar(cs),
+          if (_clip != null)
+            AudioClipToolbar(
+              canUndo: _canUndoSample,
+              canRedo: _canRedoSample,
+              onUndo: _undoSample,
+              onRedo: _redoSample,
+              onProcess: _handleProcess,
+              onFrequencySplit: () => _handleSplit(context),
+              showGenerator: _showGenerator,
+              onToggleGenerator: () => _safeSetState(() => _showGenerator = !_showGenerator),
+              showSpectrogram: _showSpectrogram,
+              onToggleSpectrogram: () => _safeSetState(() => _showSpectrogram = !_showSpectrogram),
+              zoom: _zoom,
+              onZoomChanged: (v) => _safeSetState(() => _zoom = v),
+            ),
+          Expanded(
+            child: ClipRect(
+              child: Stack(
                 children: [
-                  Expanded(
-                    child: Row(
+                  if (_clip != null)
+                    Column(
                       children: [
-                        Expanded(child: _buildWaveformArea(cs)),
-                        _buildWaveformCards(cs),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Expanded(child: _buildWaveformArea(cs)),
+                              _buildWaveformCards(cs),
+                            ],
+                          ),
+                        ),
                       ],
+                    )
+                  else
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.audio_file_outlined, size: 48, color: cs.onSurfaceVariant),
+                          const SizedBox(height: 8),
+                          Text(_loadError ?? 'No audio data', style: TextStyle(color: _loadError != null ? cs.error : cs.onSurfaceVariant)),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Generate Waveform'),
+                            onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  _buildTransportBar(cs),
+                  if (_showGenerator)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: GeneratorPanel(
+                        onGenerate: (samples, type) {
+                          _pushSampleUndo();
+                          _safeSetState(() {
+                            _clip = AudioClip(samples: samples, sampleRate: 44100,
+                                genParams: WaveformGenParams(type: type, frequency: 440));
+                            _loadError = null;
+                            _showGenerator = false;
+                          });
+                        },
+                      ),
+                    ),
                 ],
-              )
-            else
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.audio_file_outlined, size: 48, color: cs.onSurfaceVariant),
-                    const SizedBox(height: 8),
-                    Text(_loadError ?? 'No audio data', style: TextStyle(color: _loadError != null ? cs.error : cs.onSurfaceVariant)),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Generate Waveform'),
-                      onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
-                    ),
-                  ],
-                ),
               ),
-            if (_showGenerator)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: GeneratorPanel(
-                  onGenerate: (samples, type) {
-                    _safeSetState(() {
-                      _clip = AudioClip(samples: samples, sampleRate: 44100,
-                          genParams: WaveformGenParams(type: type, frequency: 440));
-                      _loadError = null;
-                      _showGenerator = false;
-                    });
-                  },
-                ),
-              ),
-          ],
-        ),
+            ),
+          ),
+          if (_clip != null) _buildTransportBar(cs),
+        ],
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar(ColorScheme cs, bool isDesktop) {
-    return AppBar(
-      backgroundColor: cs.surface,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.close),
-        onPressed: () => Navigator.of(context).pop(),
+  Widget _buildTitleBar(ColorScheme cs) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
+        ),
       ),
-      title: Text(
-        _track?.name ?? (widget.initialGenType != null ? 'New ${widget.initialGenType}' : 'Audio Editor'),
-        style: const TextStyle(fontSize: 14),
-      ),
-      actions: [
-        if (_clip != null) ...[
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.auto_fix_high, size: 18),
-            tooltip: 'Process',
-            onSelected: (action) => _handleProcess(action),
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'normalize', child: Text('Normalize', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'reverse', child: Text('Reverse', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'removeDc', child: Text('Remove DC Offset', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'fadeIn', child: Text('Fade In', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'fadeOut', child: Text('Fade Out', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'distort', child: Text('Distort', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'delay', child: Text('Delay', style: TextStyle(fontSize: 12))),
-              const PopupMenuItem(value: 'reverb', child: Text('Reverb', style: TextStyle(fontSize: 12))),
-            ],
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.call_split, size: 18),
-            tooltip: 'Frequency Split',
-            onSelected: (action) => _handleSplit(context),
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'split', child: Text('Split Frequencies...', style: TextStyle(fontSize: 12))),
-            ],
-          ),
+      child: Row(
+        children: [
           IconButton(
-            icon: Icon(_showSpectrogram ? Icons.wifi : Icons.wifi_outlined, size: 18),
-            tooltip: 'Spectrogram',
-            onPressed: () => _safeSetState(() => _showSpectrogram = !_showSpectrogram),
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => Navigator.of(context).pop(),
+            padding: EdgeInsets.zero,
+            splashRadius: 16,
+            style: IconButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            ),
           ),
-          IconButton(
-            icon: Icon(_showGenerator ? Icons.expand_more : Icons.expand_less, size: 18),
-            tooltip: 'Generator',
-            onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
+          const SizedBox(width: 8),
+          Text(
+            _track?.name ?? (widget.initialGenType != null ? 'New ${widget.initialGenType}' : 'Audio Editor'),
+            style: const TextStyle(fontSize: 14),
           ),
+          const Spacer(),
+          if (_clip == null && _loadError != null)
+            TextButton.icon(
+              icon: const Icon(Icons.add, size: 14),
+              label: const Text('Generate Waveform', style: TextStyle(fontSize: 11)),
+              onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+            ),
         ],
-        SizedBox(
-          width: 100,
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-            ),
-            child: Slider(
-              value: _zoom,
-              min: 0.5, max: 10,
-              onChanged: (v) => _safeSetState(() => _zoom = v),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: Text('${(_zoom * 100).round()}%',
-              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
-        ),
-      ],
+      ),
     );
   }
 
@@ -614,6 +635,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
 
   void _onWaveformDropped(Float64List samples) {
     if (_clip == null) return;
+    _pushSampleUndo();
     final insertSample = (_playheadSec * _clip!.sampleRate).round().clamp(0, _clip!.samples.length);
     final endSample = (insertSample + samples.length).clamp(0, _clip!.samples.length);
     final mixLen = endSample - insertSample;
@@ -696,10 +718,11 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     );
   }
 
-  void _handleProcess(String action) {
+  Future<void> _handleProcess(String action) async {
     if (_clip == null) return;
 
     void applyAll(Float64List Function(Float64List) fn) {
+      _pushSampleUndo();
       if (_clip!.selection != null && _clip!.selection!.isValid) {
         _applyToSelection(fn);
       } else {
@@ -708,31 +731,375 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
       }
     }
 
+    // Simple no-dialog effects
     switch (action) {
       case 'normalize':
         applyAll((s) => AudioProcessingService.normalizePeak(s));
-        break;
+        return;
       case 'reverse':
         applyAll((s) => AudioProcessingService.reverse(s));
-        break;
+        return;
       case 'removeDc':
         applyAll((s) => AudioProcessingService.removeDCOffset(s));
-        break;
-      case 'fadeIn':
-        applyAll((s) => AudioProcessingService.fadeIn(s, 0.5, _clip!.sampleRate));
-        break;
-      case 'fadeOut':
-        applyAll((s) => AudioProcessingService.fadeOut(s, 0.5, _clip!.sampleRate));
-        break;
-      case 'distort':
-        applyAll((s) => AudioProcessingService.distort(s, 0.3));
-        break;
-      case 'delay':
-        applyAll((s) => AudioProcessingService.delay(s, _clip!.sampleRate));
-        break;
+        return;
+      case 'invert':
+        applyAll((s) => AudioProcessingService.invert(s));
+        return;
+    }
+
+    // Effects with dialogs
+    final dialogResult = await _openEffectDialog(action);
+    if (dialogResult == null || dialogResult.samples == null) return;
+
+    _pushSampleUndo();
+    _clip!.samples.setAll(0, dialogResult.samples!);
+    _safeSetState(() {});
+  }
+
+  Future<EffectResult?> _openEffectDialog(String action) async {
+    if (_clip == null) return null;
+
+    switch (action) {
+      case 'compressor':
+        return showEffectDialog(
+          context: context,
+          title: 'Compressor / Expander',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'threshold': -20, 'ratio': 4, 'knee': 6, 'attackMs': 5, 'releaseMs': 100, 'makeupGain': 0},
+          process: (s, sr, p) => AudioProcessingService.dynamicsProcessor(s, sr,
+            threshold: p['threshold']!, ratio: p['ratio']!, knee: p['knee']!,
+            attackMs: p['attackMs']!, releaseMs: p['releaseMs']!, makeupGain: p['makeupGain']!,
+          ),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Threshold', paramKey: 'threshold', params: params, onChanged: onChanged, min: -60, max: 0, display: (v) => '${v.round()} dB', defaultValue: -20),
+              effectSlider(label: 'Ratio', paramKey: 'ratio', params: params, onChanged: onChanged, min: 1, max: 20, display: (v) => '${v.toStringAsFixed(1)}:1', defaultValue: 4),
+              effectSlider(label: 'Knee', paramKey: 'knee', params: params, onChanged: onChanged, min: 0, max: 20, display: (v) => '${v.round()} dB', defaultValue: 6),
+              effectSlider(label: 'Attack', paramKey: 'attackMs', params: params, onChanged: onChanged, min: 0.1, max: 100, display: (v) => '${v.round()} ms', defaultValue: 5),
+              effectSlider(label: 'Release', paramKey: 'releaseMs', params: params, onChanged: onChanged, min: 10, max: 1000, display: (v) => '${v.round()} ms', defaultValue: 100),
+              effectSlider(label: 'Makeup', paramKey: 'makeupGain', params: params, onChanged: onChanged, min: -12, max: 24, display: (v) => '${v.round()} dB', defaultValue: 0),
+            ],
+          ),
+        );
+      case 'echo':
+        return showEffectDialog(
+          context: context,
+          title: 'Echo',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'delay1': 0.3, 'delay2': 0.5, 'delay3': 0.7, 'gain': 0.4, 'mix': 0.5},
+          process: (s, sr, p) => AudioProcessingService.echo(s, sr,
+            delays: [p['delay1']!, p['delay2']!, p['delay3']!],
+            gains: [p['gain']!, p['gain']! * 0.6, p['gain']! * 0.35],
+            mix: p['mix']!,
+          ),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Delay 1', paramKey: 'delay1', params: params, onChanged: onChanged, min: 0.05, max: 2, display: (v) => '${v.toStringAsFixed(2)}s', defaultValue: 0.3),
+              effectSlider(label: 'Delay 2', paramKey: 'delay2', params: params, onChanged: onChanged, min: 0.05, max: 2, display: (v) => '${v.toStringAsFixed(2)}s', defaultValue: 0.5),
+              effectSlider(label: 'Delay 3', paramKey: 'delay3', params: params, onChanged: onChanged, min: 0.05, max: 2, display: (v) => '${v.toStringAsFixed(2)}s', defaultValue: 0.7),
+              effectSlider(label: 'Gain', paramKey: 'gain', params: params, onChanged: onChanged, min: 0, max: 1, display: (v) => '${(v * 100).round()}%', defaultValue: 0.4),
+              effectSlider(label: 'Mix', paramKey: 'mix', params: params, onChanged: onChanged, min: 0, max: 1, display: (v) => '${(v * 100).round()}%', defaultValue: 0.5),
+            ],
+          ),
+        );
       case 'reverb':
-        applyAll((s) => AudioProcessingService.reverb(s, _clip!.sampleRate));
-        break;
+        return showEffectDialog(
+          context: context,
+          title: 'Reverb',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'roomSize': 0.6, 'damping': 0.3, 'predelayMs': 30, 'mix': 0.3},
+          process: (s, sr, p) => AudioProcessingService.reverbEnhanced(s, sr,
+            roomSize: p['roomSize']!, damping: p['damping']!, predelayMs: p['predelayMs']!, mix: p['mix']!,
+          ),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Room Size', paramKey: 'roomSize', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 0.6),
+              effectSlider(label: 'Damping', paramKey: 'damping', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 0.3),
+              effectSlider(label: 'Predelay', paramKey: 'predelayMs', params: params, onChanged: onChanged, min: 0, max: 200, display: (v) => '${v.round()} ms', defaultValue: 30),
+              effectSlider(label: 'Mix', paramKey: 'mix', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 0.3),
+            ],
+          ),
+        );
+      case 'delay':
+        return showEffectDialog(
+          context: context,
+          title: 'Delay',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'delayTime': 0.3, 'feedback': 0.4, 'mix': 0.5},
+          process: (s, sr, p) => AudioProcessingService.delay(s, sr,
+            delayTime: p['delayTime']!, feedback: p['feedback']!, mix: p['mix']!,
+          ),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Delay', paramKey: 'delayTime', params: params, onChanged: onChanged, min: 0.05, max: 2, display: (v) => '${v.toStringAsFixed(2)}s', defaultValue: 0.3),
+              effectSlider(label: 'Feedback', paramKey: 'feedback', params: params, onChanged: onChanged, min: 0, max: 0.99, display: (v) => '${(v * 100).round()}%', defaultValue: 0.4),
+              effectSlider(label: 'Mix', paramKey: 'mix', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 0.5),
+            ],
+          ),
+        );
+      case 'equalizer':
+        return showEffectDialog(
+          context: context,
+          title: 'Equalizer',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'freq1': 80, 'gain1': 0, 'q1': 1, 'freq2': 1000, 'gain2': 0, 'q2': 1, 'freq3': 5000, 'gain3': 0, 'q3': 1},
+          process: (s, sr, p) => AudioProcessingService.equalizer(s, sr,
+            bands: [
+              (freq: p['freq1']!, gain: p['gain1']!, q: p['q1']!),
+              (freq: p['freq2']!, gain: p['gain2']!, q: p['q2']!),
+              (freq: p['freq3']!, gain: p['gain3']!, q: p['q3']!),
+            ],
+          ),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Band 1 (Low)', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              effectSlider(label: 'Freq', paramKey: 'freq1', params: params, onChanged: onChanged, min: 20, max: 500, logarithmic: true, display: (v) => '${v.round()} Hz', defaultValue: 80),
+              effectSlider(label: 'Gain', paramKey: 'gain1', params: params, onChanged: onChanged, min: -24, max: 24, display: (v) => '${v.round()} dB', defaultValue: 0),
+              effectSlider(label: 'Q', paramKey: 'q1', params: params, onChanged: onChanged, min: 0.1, max: 10, display: (v) => v.toStringAsFixed(1), defaultValue: 1),
+              const SizedBox(height: 8),
+              Text('Band 2 (Mid)', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              effectSlider(label: 'Freq', paramKey: 'freq2', params: params, onChanged: onChanged, min: 200, max: 8000, logarithmic: true, display: (v) => '${v.round()} Hz', defaultValue: 1000),
+              effectSlider(label: 'Gain', paramKey: 'gain2', params: params, onChanged: onChanged, min: -24, max: 24, display: (v) => '${v.round()} dB', defaultValue: 0),
+              effectSlider(label: 'Q', paramKey: 'q2', params: params, onChanged: onChanged, min: 0.1, max: 10, display: (v) => v.toStringAsFixed(1), defaultValue: 1),
+              const SizedBox(height: 8),
+              Text('Band 3 (High)', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              effectSlider(label: 'Freq', paramKey: 'freq3', params: params, onChanged: onChanged, min: 1000, max: 20000, logarithmic: true, display: (v) => '${v.round()} Hz', defaultValue: 5000),
+              effectSlider(label: 'Gain', paramKey: 'gain3', params: params, onChanged: onChanged, min: -24, max: 24, display: (v) => '${v.round()} dB', defaultValue: 0),
+              effectSlider(label: 'Q', paramKey: 'q3', params: params, onChanged: onChanged, min: 0.1, max: 10, display: (v) => v.toStringAsFixed(1), defaultValue: 1),
+            ],
+          ),
+        );
+      case 'pitchShift':
+        return showEffectDialog(
+          context: context,
+          title: 'Pitch Shifter',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'semitones': 0},
+          process: (s, sr, p) => AudioProcessingService.pitchShift(s, sr, semitones: p['semitones']!),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Semitones', paramKey: 'semitones', params: params, onChanged: onChanged, min: -12, max: 12, display: (v) => '${v >= 0 ? "+" : ""}${v.toStringAsFixed(1)}', defaultValue: 0),
+              Text('Tip: -12 = octave down, +12 = octave up', style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ],
+          ),
+        );
+      case 'doppler':
+        return showEffectDialog(
+          context: context,
+          title: 'Doppler (Dynamic Pitch)',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'depth': 0.5, 'rate': 0.5},
+          process: (s, sr, p) => AudioProcessingService.doppler(s, sr, depth: p['depth']!, rate: p['rate']!),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Depth', paramKey: 'depth', params: params, onChanged: onChanged, min: 0, max: 6, display: (v) => '${v.toStringAsFixed(1)} st', defaultValue: 0.5),
+              effectSlider(label: 'Rate', paramKey: 'rate', params: params, onChanged: onChanged, min: 0.1, max: 10, display: (v) => '${v.toStringAsFixed(1)} Hz', defaultValue: 0.5),
+            ],
+          ),
+        );
+      case 'fadeIn':
+        return showEffectDialog(
+          context: context,
+          title: 'Fade In',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'duration': 0.5},
+          process: (s, sr, p) => AudioProcessingService.fadeIn(s, p['duration']!, sr),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Duration', paramKey: 'duration', params: params, onChanged: onChanged, min: 0.05, max: 10, display: (v) => '${v.toStringAsFixed(1)}s', defaultValue: 0.5),
+            ],
+          ),
+        );
+      case 'fadeOut':
+        return showEffectDialog(
+          context: context,
+          title: 'Fade Out',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'duration': 0.5},
+          process: (s, sr, p) => AudioProcessingService.fadeOut(s, p['duration']!, sr),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Duration', paramKey: 'duration', params: params, onChanged: onChanged, min: 0.05, max: 10, display: (v) => '${v.toStringAsFixed(1)}s', defaultValue: 0.5),
+            ],
+          ),
+        );
+      case 'distort':
+        return showEffectDialog(
+          context: context,
+          title: 'Distortion',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'threshold': 0.3},
+          process: (s, sr, p) => AudioProcessingService.distort(s, p['threshold']!),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Threshold', paramKey: 'threshold', params: params, onChanged: onChanged, min: 0.01, max: 1, display: (v) => '${(v * 100).round()}%', defaultValue: 0.3),
+            ],
+          ),
+        );
+      case 'amplitudeMap':
+        return showEffectDialog(
+          context: context,
+          title: 'Amplitude Mapping',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'drive': 1.0},
+          process: (s, sr, p) {
+            final drive = p['drive']!;
+            // Build a curve: soft-clipping transfer
+            final curve = List.generate(256, (i) {
+              final x = i / 255.0;
+              final mapped = x * drive;
+              return mapped > 1 ? 1.0 - (mapped - 1) * 0.3 : mapped;
+            });
+            // Ensure monotonic
+            for (int i = 1; i < curve.length; i++) {
+              curve[i] = curve[i].clamp(0.0, 1.0);
+            }
+            return AudioProcessingService.amplitudeMap(s, curve);
+          },
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Drive', paramKey: 'drive', params: params, onChanged: onChanged, min: 0.1, max: 5, display: (v) => v.toStringAsFixed(1), defaultValue: 1.0),
+            ],
+          ),
+        );
+      case 'mechanize':
+        return showEffectDialog(
+          context: context,
+          title: 'Mechanization',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'sampleRateReduce': 0.1, 'bitDepth': 8},
+          process: (s, sr, p) => AudioProcessingService.mechanize(s, sr,
+            sampleRateReduce: p['sampleRateReduce']!, bitDepth: p['bitDepth']!,
+          ),
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Rate Reduce', paramKey: 'sampleRateReduce', params: params, onChanged: onChanged, min: 0.01, max: 0.5, display: (v) => '${(v * 100).round()}%', defaultValue: 0.1),
+              effectSlider(label: 'Bit Depth', paramKey: 'bitDepth', params: params, onChanged: onChanged, min: 2, max: 16, divisions: 14, display: (v) => '${v.round()} bit', defaultValue: 8),
+            ],
+          ),
+        );
+      case 'spectrumFilter':
+        return showEffectDialog(
+          context: context,
+          title: 'Spectrum Filter',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'lowCut': 0, 'highCut': 1, 'amount': 1},
+          process: (s, sr, p) {
+            final fftSize = 2048;
+            final half = fftSize ~/ 2;
+            final lowBin = (p['lowCut']! * half).round().clamp(0, half);
+            final highBin = (p['highCut']! * half).round().clamp(lowBin, half);
+            final amount = p['amount']!;
+            final envelope = List.generate(half + 1, (i) {
+              if (i < lowBin || i > highBin) return 1.0 - amount * 0.8;
+              return 1.0;
+            });
+            return AudioProcessingService.spectrumFilter(s, sr, envelope: envelope, fftSize: fftSize);
+          },
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Low Cut', paramKey: 'lowCut', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 0),
+              effectSlider(label: 'High Cut', paramKey: 'highCut', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 1),
+              effectSlider(label: 'Amount', paramKey: 'amount', params: params, onChanged: onChanged, display: (v) => '${(v * 100).round()}%', defaultValue: 1),
+            ],
+          ),
+        );
+      case 'splitByFreq':
+        return showEffectDialog(
+          context: context,
+          title: 'Channel Split (Freq)',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'lowFreq': 200, 'midFreq': 2000},
+          process: (s, sr, p) {
+            // Split into Low/Mid/High and sum back as multi-channel mix
+            final bands = [
+              FreqBand(lowFreq: 0, highFreq: p['lowFreq']!),
+              FreqBand(lowFreq: p['lowFreq']!, highFreq: p['midFreq']!),
+              FreqBand(lowFreq: p['midFreq']!, highFreq: sr / 2),
+            ];
+            // For preview, mix them back together
+            final split = FftService.splitBands(s, sr, bands);
+            if (split.length != 3) return Float64List.fromList(s);
+            final result = Float64List(s.length);
+            for (int i = 0; i < s.length; i++) {
+              result[i] = (split[0][i] + split[1][i] + split[2][i]) / 3;
+            }
+            return result;
+          },
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Low-Mid Cross', paramKey: 'lowFreq', params: params, onChanged: onChanged, min: 20, max: 2000, logarithmic: true, display: (v) => '${v.round()} Hz', defaultValue: 200),
+              effectSlider(label: 'Mid-High Cross', paramKey: 'midFreq', params: params, onChanged: onChanged, min: 200, max: 20000, logarithmic: true, display: (v) => '${v.round()} Hz', defaultValue: 2000),
+            ],
+          ),
+        );
+      case 'splitByTime':
+        return showEffectDialog(
+          context: context,
+          title: 'Channel Split (Time)',
+          clipSamples: _clip!.samples,
+          sampleRate: _clip!.sampleRate,
+          initialParams: {'split1': 1.0, 'split2': 3.0},
+          process: (s, sr, p) {
+            // For preview, merge slices back
+            final splits = AudioProcessingService.splitByTime(s, sr, [p['split1']!, p['split2']!]);
+            if (splits.isEmpty) return Float64List.fromList(s);
+            final result = Float64List(s.length);
+            int pos = 0;
+            for (final seg in splits) {
+              for (int i = 0; i < seg.length && pos + i < s.length; i++) {
+                result[pos + i] = seg[i];
+              }
+              pos += seg.length;
+            }
+            return result;
+          },
+          builder: (ctx, params, onChanged) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              effectSlider(label: 'Split 1', paramKey: 'split1', params: params, onChanged: onChanged, min: 0.1, max: 30, display: (v) => '${v.toStringAsFixed(1)}s', defaultValue: 1.0),
+              effectSlider(label: 'Split 2', paramKey: 'split2', params: params, onChanged: onChanged, min: 0.1, max: 30, display: (v) => '${v.toStringAsFixed(1)}s', defaultValue: 3.0),
+            ],
+          ),
+        );
+      case 'mixer':
+        // Multi-channel mixer is a special case that needs multiple tracks
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Multi-Channel Mixer: open the Channel Split tools first, then merge channels.')),
+          );
+        }
+        return null;
+      default:
+        return null;
     }
   }
 
