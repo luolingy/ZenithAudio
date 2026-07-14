@@ -1,51 +1,42 @@
 import 'package:flutter/material.dart';
 
-const Color _seed = Color(0xFF00BFA5);
+const Color _seed = Color(0xFF00AAFF);
 
 class AppTheme {
   AppTheme._();
 
+  // ── FL Studio-inspired Dark Theme ──────────────────────────
   static ThemeData get darkTheme {
     final cs = ColorScheme.fromSeed(
       seedColor: _seed,
       brightness: Brightness.dark,
     ).copyWith(
-      surface: const Color(0xFF1A1A1E),
-      surfaceContainerLowest: const Color(0xFF151518),
-      surfaceContainerLow: const Color(0xFF1E1E23),
-      surfaceContainer: const Color(0xFF232328),
-      surfaceContainerHigh: const Color(0xFF2C2C33),
-      surfaceContainerHighest: const Color(0xFF363640),
+      primary: const Color(0xFF00AAFF),
+      onPrimary: const Color(0xFF000000),
+      primaryContainer: const Color(0xFF003355),
+      onPrimaryContainer: const Color(0xFF88DDFF),
+      secondary: const Color(0xFFFF8800),
+      onSecondary: const Color(0xFF000000),
+      surface: const Color(0xFF0F0F0F),
+      surfaceContainerLowest: const Color(0xFF0A0A0A),
+      surfaceContainerLow: const Color(0xFF141416),
+      surfaceContainer: const Color(0xFF1A1A1E),
+      surfaceContainerHigh: const Color(0xFF222228),
+      surfaceContainerHighest: const Color(0xFF2A2A32),
       onSurface: const Color(0xFFE8E8EC),
-      onSurfaceVariant: const Color(0xFF9E9EB0),
-      outline: const Color(0xFF6B6B7D),
-      outlineVariant: const Color(0xFF3A3A42),
+      onSurfaceVariant: const Color(0xFF8888A0),
+      outline: const Color(0xFF555570),
+      outlineVariant: const Color(0xFF2A2A35),
       error: const Color(0xFFFF5252),
+      shadow: const Color(0xFF000000),
+      scrim: const Color(0xFF000000),
     );
 
     return _buildTheme(cs, Brightness.dark);
   }
 
-  static ThemeData get lightTheme {
-    final cs = ColorScheme.fromSeed(
-      seedColor: _seed,
-      brightness: Brightness.light,
-    ).copyWith(
-      surface: const Color(0xFFF5F5F7),
-      surfaceContainerLowest: const Color(0xFFFFFFFF),
-      surfaceContainerLow: const Color(0xFFF0F0F4),
-      surfaceContainer: const Color(0xFFFFFFFF),
-      surfaceContainerHigh: const Color(0xFFEEEEF2),
-      surfaceContainerHighest: const Color(0xFFE4E4EA),
-      onSurface: const Color(0xFF1A1A1E),
-      onSurfaceVariant: const Color(0xFF6B6B7D),
-      outline: const Color(0xFF9E9EB0),
-      outlineVariant: const Color(0xFFD0D0D8),
-      error: const Color(0xFFB3261E),
-    );
-
-    return _buildTheme(cs, Brightness.light);
-  }
+  // ── Light theme (minimal, FL Studio doesn"t really do light) ──
+  static ThemeData get lightTheme => darkTheme;
 
   static ThemeData _buildTheme(ColorScheme cs, Brightness brightness) {
     final isDark = brightness == Brightness.dark;
@@ -66,64 +57,81 @@ class AppTheme {
         thickness: 1,
         space: 0,
       ),
-      iconTheme: const IconThemeData(size: 18),
+      iconTheme: const IconThemeData(size: 16),
       sliderTheme: SliderThemeData(
         activeTrackColor: cs.primary,
         inactiveTrackColor: cs.outlineVariant,
         thumbColor: cs.primary,
-        overlayColor: cs.primary.withAlpha(30),
-        trackHeight: 3,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayColor: cs.primary.withAlpha(20),
+        trackHeight: 2,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: cs.surfaceContainerHigh,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           borderSide: BorderSide(color: cs.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           borderSide: BorderSide(color: cs.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           borderSide: BorderSide(color: cs.primary),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
-          color: isDark ? cs.surfaceContainerHighest : const Color(0xFF2C2C33),
+          color: cs.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(4),
         ),
-        textStyle: TextStyle(color: cs.onSurface, fontSize: 11),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        textStyle: TextStyle(color: cs.onSurface, fontSize: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: cs.surfaceContainerHigh,
-        contentTextStyle: TextStyle(color: cs.onSurface),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        contentTextStyle: TextStyle(color: cs.onSurface, fontSize: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         behavior: SnackBarBehavior.floating,
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: cs.surfaceContainer,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: cs.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        elevation: 6,
       ),
       dropdownMenuTheme: DropdownMenuThemeData(
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: cs.surfaceContainerHigh,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(6),
             borderSide: BorderSide(color: cs.outlineVariant),
           ),
         ),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return cs.primary;
+          return cs.surfaceContainerHigh;
+        }),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return cs.primary;
+          return cs.onSurfaceVariant;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return cs.primary.withAlpha(80);
+          return cs.surfaceContainerHighest;
+        }),
       ),
     );
   }

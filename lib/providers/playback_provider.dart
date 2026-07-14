@@ -13,6 +13,8 @@ final playbackProvider = NotifierProvider<PlaybackNotifier, PlaybackState>(
 
 final playheadPositionProvider = StateProvider<double>((ref) => 0);
 
+final currentStepProvider = StateProvider<int>((ref) => -1);
+
 final masterVolumeProvider = StateProvider<double>((ref) => 0.8);
 
 final pixelsPerSecondProvider = StateProvider<double>((ref) => 50.0);
@@ -26,6 +28,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final audio = ref.read(audioServiceProvider);
     audio.onPositionChanged = (pos) {
       ref.read(playheadPositionProvider.notifier).state = pos;
+      final project = ref.read(projectProvider);
+      final bpm = project.bpm;
+      final stepsPerBeat = 4;
+      final secondsPerStep = 60.0 / bpm / stepsPerBeat;
+      final step = (pos / secondsPerStep).floor() % 16;
+      ref.read(currentStepProvider.notifier).state = step;
     };
     audio.onCompleted = () {
       final settings = ref.read(settingsProvider);

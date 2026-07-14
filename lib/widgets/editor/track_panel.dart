@@ -14,7 +14,6 @@ class TrackPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final project = ref.watch(projectProvider);
     final screenSize = getScreenSize(context);
-    final cs = Theme.of(context).colorScheme;
 
     final panelWidth = switch (screenSize) {
       ScreenSize.mobile => 180.0,
@@ -25,33 +24,14 @@ class TrackPanel extends ConsumerWidget {
     return Container(
       width: panelWidth,
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: context.surfaceHigh,
         border: Border(
           right: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
         ),
       ),
       child: Column(
         children: [
-          Container(
-            height: AppConstants.timelineHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: context.surfaceHigh,
-              border: Border(
-                bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
-              ),
-            ),
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'track.header'.tr(),
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1,
-              ),
-            ),
-          ),
+          _ChannelRackHeader(),
           Expanded(
             child: project.tracks.isEmpty
                 ? Center(
@@ -88,6 +68,50 @@ class TrackPanel extends ConsumerWidget {
                     ),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChannelRackHeader extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = ref.watch(projectProvider);
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      height: AppConstants.timelineHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(51),
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 8),
+          Icon(Icons.grid_view_rounded, size: 12, color: cs.onSurfaceVariant),
+          const SizedBox(width: 4),
+          Text(
+            'CHANNELS',
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '${project.tracks.length}',
+            style: TextStyle(
+              color: context.outline,
+              fontSize: 9,
+            ),
+          ),
+          const SizedBox(width: 4),
         ],
       ),
     );

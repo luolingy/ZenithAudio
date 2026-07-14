@@ -11,11 +11,13 @@ class Track {
   final String? instrumentName;
   final List<Note> notes;
   final double volume;
+  final double pan;
   final bool isMuted;
   final bool isSolo;
   final String? audioFilePath;
   final Color color;
   final double duration;
+  final List<bool> stepPattern;
 
   const Track({
     required this.id,
@@ -24,11 +26,13 @@ class Track {
     this.instrumentName,
     this.notes = const [],
     this.volume = 0.8,
+    this.pan = 0.0,
     this.isMuted = false,
     this.isSolo = false,
     this.audioFilePath,
     this.color = AppColors.waveform,
     this.duration = 0,
+    this.stepPattern = const [],
   });
 
   double get computedDuration {
@@ -46,11 +50,13 @@ class Track {
     String? instrumentName,
     List<Note>? notes,
     double? volume,
+    double? pan,
     bool? isMuted,
     bool? isSolo,
     String? audioFilePath,
     Color? color,
     double? duration,
+    List<bool>? stepPattern,
   }) {
     return Track(
       id: id ?? this.id,
@@ -59,11 +65,13 @@ class Track {
       instrumentName: instrumentName ?? this.instrumentName,
       notes: notes ?? this.notes,
       volume: volume ?? this.volume,
+      pan: pan ?? this.pan,
       isMuted: isMuted ?? this.isMuted,
       isSolo: isSolo ?? this.isSolo,
       audioFilePath: audioFilePath ?? this.audioFilePath,
       color: color ?? this.color,
       duration: duration ?? this.duration,
+      stepPattern: stepPattern ?? this.stepPattern,
     );
   }
 

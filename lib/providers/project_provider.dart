@@ -396,6 +396,7 @@ class ProjectNotifier extends Notifier<Project> {
       instrumentName: instrumentName ?? 'piano',
       volume: 0.8,
       color: trackColors[state.tracks.length % trackColors.length],
+      stepPattern: List.generate(16, (_) => false),
     );
 
     state = state.copyWith(tracks: [...state.tracks, track]);
@@ -428,6 +429,41 @@ class ProjectNotifier extends Notifier<Project> {
     );
     ref.read(audioServiceProvider).updateTrackVolume(trackId, volume);
     AppLogger.d('Track "$trackName" volume: ${(volume * 100).toInt()}%');
+  }
+
+  void updateTrackPan(String trackId, double pan) {
+    _markDirty();
+    state = state.copyWith(
+      tracks: state.tracks.map((t) {
+        if (t.id == trackId) return t.copyWith(pan: pan.clamp(-1.0, 1.0));
+        return t;
+      }).toList(),
+    );
+  }
+
+  void toggleTrackStep(String trackId, int step) {
+    _markDirty();
+    final track = state.tracks.firstWhere((t) => t.id == trackId);
+    final pattern = List<bool>.from(track.stepPattern);
+    if (step >= 0 && step < pattern.length) {
+      pattern[step] = !pattern[step];
+    }
+    state = state.copyWith(
+      tracks: state.tracks.map((t) {
+        if (t.id == trackId) return t.copyWith(stepPattern: pattern);
+        return t;
+      }).toList(),
+    );
+  }
+
+  void setTrackStepPattern(String trackId, List<bool> pattern) {
+    _markDirty();
+    state = state.copyWith(
+      tracks: state.tracks.map((t) {
+        if (t.id == trackId) return t.copyWith(stepPattern: pattern);
+        return t;
+      }).toList(),
+    );
   }
 
   void toggleTrackMute(String trackId) {

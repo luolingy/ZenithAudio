@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
-import '../../core/utils/theme_colors.dart';
+import '../../core/utils/responsive_utils.dart';
 import '../../models/track.dart';
 import '../../core/instrument_picker.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/playback_provider.dart';
 import '../../providers/floating_window_provider.dart';
+import '../layout/rotary_knob.dart';
 import 'piano_roll_editor.dart';
 import 'audio_clip_editor.dart';
 
@@ -29,154 +31,44 @@ class TrackTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hasSolo = ref.watch(projectProvider).hasSoloTrack;
+    final isPlaying = ref.watch(playbackProvider) == PlaybackState.playing;
     final cs = Theme.of(context).colorScheme;
+    final isMobile = getScreenSize(context) == ScreenSize.mobile;
 
     return GestureDetector(
-      onTap: () {
-        if (track.type == TrackType.instrument) {
-          final settings = ref.read(settingsProvider);
-          if (settings.editorMode == 'float') {
-            ref.read(floatingWindowProvider.notifier).open(
-              title: 'Piano Roll: ${track.name}',
-              builder: (_) => PianoRollEditor(trackId: track.id, isFloating: true),
-            );
-          } else {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => PianoRollEditor(trackId: track.id),
-              ),
-            );
-          }
-        } else if (track.type == TrackType.audio) {
-          final settings = ref.read(settingsProvider);
-          if (settings.editorMode == 'float') {
-            ref.read(floatingWindowProvider.notifier).open(
-              title: 'Audio: ${track.name}',
-              builder: (_) => AudioClipEditor(trackId: track.id, isFloating: true),
-            );
-          } else {
-            openAudioClipEditor(context, track.id);
-          }
-        }
-      },
+      onTap: () => _openEditor(context, ref),
       onSecondaryTapDown: (details) =>
           _showContextMenu(context, ref, details.localPosition),
-      onLongPressStart: (details) =>
-          _showContextMenu(context, ref, details.localPosition),
+      onLongPressStart: (details) {
+        if (isMobile) _showContextMenu(context, ref, details.localPosition);
+      },
       child: Container(
         height: AppConstants.trackTileHeight,
-        padding: const EdgeInsets.fromLTRB(0, 0, 0, 1),
         decoration: BoxDecoration(
           color: _getBackgroundColor(context, hasSolo),
           border: Border(
             bottom: BorderSide(color: Theme.of(context).dividerColor.withAlpha(128)),
           ),
         ),
-        child: Column(
+        child: Row(
           children: [
-            Container(
-              height: 28,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: track.color.withAlpha(38),
-                border: Border(
-                  bottom: BorderSide(color: Theme.of(context).dividerColor.withAlpha(77)),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 4, height: 16,
-                    decoration: BoxDecoration(
-                      color: track.color,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  if (track.type == TrackType.instrument)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Icon(Icons.piano_outlined, size: 12, color: cs.primary),
-                    ),
-                  Expanded(
-                    child: Text(
-                      track.name,
-                      style: TextStyle(
-                        color: cs.onSurface,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _ColorStrip(color: track.color),
+            _ChannelLabel(index: index, cs: cs),
+            _TypeIcon(track: track, cs: cs),
+            const SizedBox(width: 4),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.volume_up_outlined,
-                            size: 12, color: context.outline),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: SizedBox(
-                            height: 20,
-                            child: SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                trackHeight: 2,
-                                thumbShape: const RoundSliderThumbShape(
-                                    enabledThumbRadius: 5),
-                                overlayShape: const RoundSliderOverlayShape(
-                                    overlayRadius: 10),
-                              ),
-                              child: Slider(
-                                value: track.volume,
-                                min: 0, max: 1, divisions: 100,
-                                onChanged: (v) => ref
-                                    .read(projectProvider.notifier)
-                                    .updateTrackVolume(track.id, v),
-                              ),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${(track.volume * 100).toInt()}%',
-                          style: TextStyle(color: context.outline, fontSize: 9),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        _ControlButton(
-                          isActive: track.isMuted,
-                          activeColor: AppColors.mute,
-                          icon: track.isMuted
-                              ? Icons.volume_off_rounded
-                              : Icons.volume_up_rounded,
-                          onTap: () => ref
-                              .read(projectProvider.notifier)
-                              .toggleTrackMute(track.id),
-                        ),
-                        const SizedBox(width: 4),
-                        _ControlButton(
-                          isActive: track.isSolo,
-                          activeColor: AppColors.solo,
-                          icon: Icons.headphones_rounded,
-                          onTap: () => ref
-                              .read(projectProvider.notifier)
-                              .toggleTrackSolo(track.id),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              child: _TrackName(
+                track: track, cs: cs,
+                onRename: (name) => ref.read(projectProvider.notifier).renameTrack(track.id, name),
               ),
             ),
+            if (!isMobile) ...[
+              _VolumeKnob(track: track, ref: ref),
+              _PanKnob(track: track, ref: ref),
+            ],
+            _ControlButtons(track: track, ref: ref),
+            if (track.type == TrackType.instrument && !isMobile)
+              _StepGrid(track: track, ref: ref, isPlaying: isPlaying),
           ],
         ),
       ),
@@ -188,6 +80,34 @@ class TrackTile extends ConsumerWidget {
     if (hasSolo && !track.isSolo) return bg.withAlpha(128);
     if (track.isMuted) return bg.withAlpha(179);
     return bg;
+  }
+
+  void _openEditor(BuildContext context, WidgetRef ref) {
+    if (track.type == TrackType.instrument) {
+      final settings = ref.read(settingsProvider);
+      if (settings.editorMode == 'float') {
+        ref.read(floatingWindowProvider.notifier).open(
+          title: 'Piano Roll: ${track.name}',
+          builder: (_) => PianoRollEditor(trackId: track.id, isFloating: true),
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PianoRollEditor(trackId: track.id),
+          ),
+        );
+      }
+    } else if (track.type == TrackType.audio) {
+      final settings = ref.read(settingsProvider);
+      if (settings.editorMode == 'float') {
+        ref.read(floatingWindowProvider.notifier).open(
+          title: 'Audio: ${track.name}',
+          builder: (_) => AudioClipEditor(trackId: track.id, isFloating: true),
+        );
+      } else {
+        openAudioClipEditor(context, track.id);
+      }
+    }
   }
 
   void _showContextMenu(BuildContext context, WidgetRef ref, Offset localPos) {
@@ -339,16 +259,256 @@ class TrackTile extends ConsumerWidget {
   }
 }
 
-class _ControlButton extends StatelessWidget {
-  final IconData icon;
-  final bool isActive;
-  final Color activeColor;
+// ──── Sub-widgets ────
+
+class _ColorStrip extends StatelessWidget {
+  final Color color;
+  const _ColorStrip({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 4,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(2),
+          bottomLeft: Radius.circular(2),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChannelLabel extends StatelessWidget {
+  final int index;
+  final ColorScheme cs;
+  const _ChannelLabel({required this.index, required this.cs});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 20,
+      child: Center(
+        child: Text(
+          '${index + 1}',
+          style: TextStyle(
+            color: cs.onSurfaceVariant.withAlpha(179),
+            fontSize: 9,
+            fontWeight: FontWeight.w400,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TypeIcon extends StatelessWidget {
+  final Track track;
+  final ColorScheme cs;
+  const _TypeIcon({required this.track, required this.cs});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Icon(
+        track.type == TrackType.instrument
+            ? Icons.piano_rounded
+            : Icons.audiotrack_rounded,
+        size: 13,
+        color: track.color.withAlpha(204),
+      ),
+    );
+  }
+}
+
+class _TrackName extends StatefulWidget {
+  final Track track;
+  final ColorScheme cs;
+  final ValueChanged<String> onRename;
+  const _TrackName({
+    required this.track,
+    required this.cs,
+    required this.onRename,
+  });
+
+  @override
+  State<_TrackName> createState() => _TrackNameState();
+}
+
+class _TrackNameState extends State<_TrackName> {
+  late bool _isEditing;
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _isEditing = false;
+    _controller = TextEditingController(text: widget.track.name);
+  }
+
+  @override
+  void didUpdateWidget(_TrackName old) {
+    super.didUpdateWidget(old);
+    if (widget.track.name != old.track.name && !_isEditing) {
+      _controller.text = widget.track.name;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _startEditing() {
+    setState(() => _isEditing = true);
+    _controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _controller.text.length,
+    );
+  }
+
+  void _finishEditing() {
+    final newName = _controller.text.trim();
+    if (newName.isNotEmpty && newName != widget.track.name) {
+      widget.onRename(newName);
+    }
+    setState(() => _isEditing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onDoubleTap: _startEditing,
+      child: _isEditing
+          ? SizedBox(
+              height: 20,
+              child: TextField(
+                controller: _controller,
+                autofocus: true,
+                style: TextStyle(
+                  color: widget.cs.onSurface,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                  border: InputBorder.none,
+                ),
+                onSubmitted: (_) => _finishEditing(),
+                onTapOutside: (_) => _finishEditing(),
+              ),
+            )
+          : Text(
+              widget.track.name,
+              style: TextStyle(
+                color: widget.cs.onSurface,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+    );
+  }
+}
+
+class _VolumeKnob extends StatelessWidget {
+  final Track track;
+  final WidgetRef ref;
+  const _VolumeKnob({required this.track, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: SizedBox(
+        width: 28,
+        child: Center(
+          child: RotaryKnob(
+            value: track.volume,
+            min: 0, max: 1,
+            size: 18,
+            onChanged: (v) =>
+                ref.read(projectProvider.notifier).updateTrackVolume(track.id, v),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PanKnob extends StatelessWidget {
+  final Track track;
+  final WidgetRef ref;
+  const _PanKnob({required this.track, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: SizedBox(
+        width: 28,
+        child: Center(
+          child: RotaryKnob(
+            value: (track.pan + 1) / 2,
+            min: 0, max: 1,
+            size: 18,
+            onChanged: (v) =>
+                ref.read(projectProvider.notifier).updateTrackPan(track.id, (v * 2) - 1),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ControlButtons extends StatelessWidget {
+  final Track track;
+  final WidgetRef ref;
+  const _ControlButtons({required this.track, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LedButton(
+            active: track.isMuted,
+            onColor: AppColors.mute,
+            offColor: AppColors.ledOff,
+            onTap: () => ref.read(projectProvider.notifier).toggleTrackMute(track.id),
+          ),
+          const SizedBox(width: 3),
+          _LedButton(
+            active: track.isSolo,
+            onColor: AppColors.solo,
+            offColor: AppColors.ledOff,
+            onTap: () => ref.read(projectProvider.notifier).toggleTrackSolo(track.id),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedButton extends StatelessWidget {
+  final bool active;
+  final Color onColor;
+  final Color offColor;
   final VoidCallback onTap;
 
-  const _ControlButton({
-    required this.icon,
-    required this.isActive,
-    required this.activeColor,
+  const _LedButton({
+    required this.active,
+    required this.onColor,
+    required this.offColor,
     required this.onTap,
   });
 
@@ -357,23 +517,73 @@ class _ControlButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 28, height: 20,
-        alignment: Alignment.center,
+        width: 18,
+        height: 14,
         decoration: BoxDecoration(
-          color: isActive
-              ? activeColor.withAlpha(51)
-              : context.surfaceHigh,
-          borderRadius: BorderRadius.circular(3),
+          color: active ? onColor : offColor,
+          borderRadius: BorderRadius.circular(2),
           border: Border.all(
-            color: isActive ? activeColor : Theme.of(context).dividerColor,
-            width: isActive ? 1.5 : 1,
+            color: active
+                ? onColor.withAlpha(179)
+                : Theme.of(context).dividerColor.withAlpha(128),
+            width: 0.5,
           ),
         ),
-        child: Icon(
-          icon,
-          size: 14,
-          color: isActive ? activeColor : context.outline,
-        ),
+      ),
+    );
+  }
+}
+
+class _StepGrid extends ConsumerWidget {
+  final Track track;
+  final WidgetRef ref;
+  final bool isPlaying;
+
+  const _StepGrid({
+    required this.track,
+    required this.ref,
+    required this.isPlaying,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pattern = track.stepPattern;
+    final currentStep = ref.watch(currentStepProvider);
+    final cellSize = 14.0;
+    final gap = 1.0;
+
+    return SizedBox(
+      height: AppConstants.trackTileHeight - 4,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(16, (i) {
+          final isActive = i < pattern.length && pattern[i];
+          final isCurrent = isPlaying && i == currentStep;
+          return Padding(
+            padding: EdgeInsets.only(right: gap),
+            child: GestureDetector(
+              onTap: () =>
+                  ref.read(projectProvider.notifier).toggleTrackStep(track.id, i),
+              child: Container(
+                width: cellSize,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  color: isCurrent
+                      ? (isActive
+                          ? AppColors.accent
+                          : AppColors.accent.withAlpha(77))
+                      : (isActive
+                          ? AppColors.stepActive
+                          : AppColors.stepInactive),
+                  borderRadius: BorderRadius.circular(2),
+                  border: isCurrent
+                      ? Border.all(color: AppColors.playhead, width: 1)
+                      : null,
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }

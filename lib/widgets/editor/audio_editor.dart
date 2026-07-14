@@ -12,8 +12,8 @@ import '../../providers/settings_provider.dart';
 import '../../providers/floating_window_provider.dart';
 import '../toolbar/menu_bar.dart';
 import '../toolbar/tool_bar.dart';
-import '../controls/transport_bar.dart';
 import '../layout/floating_window.dart';
+import '../mixer/mixer_panel.dart';
 import 'timeline_ruler.dart';
 import 'track_panel.dart';
 import 'waveform_view.dart';
@@ -350,7 +350,7 @@ class _AudioEditorState extends ConsumerState<AudioEditor> {
                     ),
                   ),
                 ),
-                const TransportBar(),
+                const MixerPanel(),
               ],
             ),
             // Floating windows overlay
