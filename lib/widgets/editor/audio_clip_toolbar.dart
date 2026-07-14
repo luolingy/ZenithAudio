@@ -61,7 +61,7 @@ class _AudioClipToolbarState extends State<AudioClipToolbar> {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              height: 40,
+              height: 39,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

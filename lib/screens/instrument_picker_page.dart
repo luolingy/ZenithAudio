@@ -138,7 +138,7 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
     }
   }
 
-  void _onPreviewEnd(String id, Player player, String filePath) {
+  Future<void> _onPreviewEnd(String id, Player player, String filePath) async {
     if (_previewDisposed && _previewPlayer != player) return;
     if (mounted && _previewingId == id) {
       setState(() => _previewingId = null);
@@ -146,7 +146,7 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
     _previewDisposed = true;
     player.dispose();
     if (_previewPlayer == player) _previewPlayer = null;
-    try { File(filePath).delete(); } catch (_) {}
+    try { await File(filePath).delete(); } catch (_) {}
   }
 
   Future<void> _playPreviewWeb(Uint8List wavBytes, String id) async {

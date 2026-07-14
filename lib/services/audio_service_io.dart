@@ -321,14 +321,14 @@ class AudioService {
     _completedTracks = 0;
     _totalTracks = _players.length;
     for (final tp in _players.values) {
-      tp.player.play();
+      if (!tp._disposed) tp.player.play();
     }
   }
 
   /// Play a single track without affecting other tracks' state.
   Future<void> playSingleTrack(String trackId) async {
     final tp = _players[trackId];
-    if (tp != null) {
+    if (tp != null && !tp._disposed) {
       tp.player.play();
     }
   }
@@ -336,7 +336,7 @@ class AudioService {
   /// Stop and unload a single track.
   Future<void> stopAndUnloadTrack(String trackId) async {
     final tp = _players[trackId];
-    if (tp != null) {
+    if (tp != null && !tp._disposed) {
       tp.player.stop();
     }
     await unloadTrack(trackId);
@@ -345,21 +345,21 @@ class AudioService {
   Future<void> pause() async {
     _isPlaying = false;
     for (final tp in _players.values) {
-      tp.player.pause();
+      if (!tp._disposed) tp.player.pause();
     }
   }
 
   Future<void> stop() async {
     _isPlaying = false;
     for (final tp in _players.values) {
-      tp.player.stop();
+      if (!tp._disposed) tp.player.stop();
     }
   }
 
   Future<void> seekTo(double seconds) async {
     final duration = Duration(milliseconds: (seconds * 1000).round());
     for (final tp in _players.values) {
-      tp.player.seek(duration);
+      if (!tp._disposed) tp.player.seek(duration);
     }
   }
 

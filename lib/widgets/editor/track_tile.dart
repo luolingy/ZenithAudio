@@ -68,7 +68,14 @@ class TrackTile extends ConsumerWidget {
             ],
             _ControlButtons(track: track, ref: ref),
             if (track.type == TrackType.instrument && !isMobile)
-              _StepGrid(track: track, ref: ref, isPlaying: isPlaying),
+              Flexible(
+                child: ClipRect(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: _StepGrid(track: track, ref: ref, isPlaying: isPlaying),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

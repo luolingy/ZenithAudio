@@ -176,7 +176,13 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   void dispose() {
     _disposed = true;
     _hScrollCtrl.dispose();
-    _trySave();
+    if (_hasUnsavedChanges && _clip != null && widget.trackId != null) {
+      try {
+        final samples = Float64List.fromList(_clip!.samples);
+        final path = _saveToWavSync(samples, prefix: 'track_${widget.trackId}');
+        ref.read(projectProvider.notifier).setTrackAudioFile(widget.trackId!, path);
+      } catch (_) {}
+    }
     super.dispose();
   }
 
@@ -321,6 +327,16 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     return path;
   }
 
+  /// Synchronous version for use in dispose().
+  String _saveToWavSync(Float64List samples, {String? prefix}) {
+    final dir = Directory.systemTemp;
+    final name = prefix ?? 'clip_${const Uuid().v4().substring(0, 8)}';
+    final path = '${dir.path}/$name.wav';
+    final wav = _encodeWav(samples);
+    File(path).writeAsBytesSync(wav);
+    return path;
+  }
+
   Uint8List _encodeWav(Float64List buffer) {
     final numSamples = buffer.length;
     final sampleRate = 44100;
@@ -353,17 +369,18 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
     return Uint8List.fromList(data);
   }
 
-  void _trySave() {
-    if (!_hasUnsavedChanges || _clip == null || widget.trackId == null) return;
+  Future<String?> _trySave() async {
+    if (!_hasUnsavedChanges || _clip == null || widget.trackId == null) return null;
     final samples = Float64List.fromList(_clip!.samples);
     final trackId = widget.trackId!;
-    _saveToWav(samples, prefix: 'track_$trackId').then((path) {
-      ref.read(projectProvider.notifier).setTrackAudioFile(trackId, path);
-    });
+    final path = await _saveToWav(samples, prefix: 'track_$trackId');
+    if (!mounted) return null;
+    ref.read(projectProvider.notifier).setTrackAudioFile(trackId, path);
+    return path;
   }
 
-  void _closeEditor() {
-    _trySave();
+  Future<void> _closeEditor() async {
+    await _trySave();
     if (widget.isFloating) {
       final closeFn = FloatingWindowCloseScope.of(context);
       if (closeFn != null) {
@@ -371,7 +388,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
         return;
       }
     }
-    Navigator.of(context).pop();
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _togglePlayback() {
@@ -584,7 +601,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
         children: [
           IconButton(
             icon: const Icon(Icons.close, size: 18),
-            onPressed: _closeEditor,
+            onPressed: () { _closeEditor(); },
             padding: EdgeInsets.zero,
             splashRadius: 16,
             style: IconButton.styleFrom(
