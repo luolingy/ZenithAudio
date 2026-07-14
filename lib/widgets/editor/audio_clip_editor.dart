@@ -18,6 +18,7 @@ import '../../services/fft_service.dart';
 import '../../services/audio_processing_service.dart';
 import '../../core/utils/logger.dart';
 import 'waveform_painter.dart';
+import 'spectrogram_painter.dart';
 import 'generator_panel.dart';
 import 'waveform_cards.dart';
 import 'frequency_split_dialog.dart';
@@ -113,6 +114,8 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
   double _playheadSec = 0;
   bool _isPlaying = false;
   bool _showGenerator = false;
+
+  bool _showSpectrogram = false;
 
   // Selection
   double? _dragStartSec;
@@ -512,6 +515,11 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
             ],
           ),
           IconButton(
+            icon: Icon(_showSpectrogram ? Icons.wifi : Icons.wifi_outlined, size: 18),
+            tooltip: 'Spectrogram',
+            onPressed: () => _safeSetState(() => _showSpectrogram = !_showSpectrogram),
+          ),
+          IconButton(
             icon: Icon(_showGenerator ? Icons.expand_more : Icons.expand_less, size: 18),
             tooltip: 'Generator',
             onPressed: () => _safeSetState(() => _showGenerator = !_showGenerator),
@@ -578,15 +586,22 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
                   width: _clip!.duration * _pps,
                   child: CustomPaint(
                     size: Size(_clip!.duration * _pps, 300),
-                    painter: WaveformPainter(
-                      samples: _clip!.samples,
-                      sampleRate: _clip!.sampleRate,
-                      pps: _pps,
-                      playheadSec: _isPlaying ? _playheadSec : -1,
-                      selection: _clip!.selection,
-                      waveformColor: _track?.color ?? cs.primary,
-                      scrollOffset: _hScrollCtrl.hasClients ? _hScrollCtrl.offset : 0,
-                    ),
+                    painter: _showSpectrogram
+                        ? SpectrogramPainter(
+                            samples: _clip!.samples,
+                            sampleRate: _clip!.sampleRate,
+                            pps: _pps,
+                            scrollOffset: _hScrollCtrl.hasClients ? _hScrollCtrl.offset : 0,
+                          )
+                        : WaveformPainter(
+                            samples: _clip!.samples,
+                            sampleRate: _clip!.sampleRate,
+                            pps: _pps,
+                            playheadSec: _isPlaying ? _playheadSec : -1,
+                            selection: _clip!.selection,
+                            waveformColor: _track?.color ?? cs.primary,
+                            scrollOffset: _hScrollCtrl.hasClients ? _hScrollCtrl.offset : 0,
+                          ),
                   ),
                 ),
               ),

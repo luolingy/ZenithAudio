@@ -131,7 +131,7 @@ class _WaveformCard extends StatelessWidget {
       ),
     );
 
-    return LongPressDraggable<Float64List>(
+    return Draggable<Float64List>(
       data: card.generator(),
       feedback: Material(
         elevation: 6,
@@ -159,9 +159,6 @@ class _WaveformCard extends StatelessWidget {
         ),
       ),
       childWhenDragging: Opacity(opacity: 0.3, child: child),
-      onDragEnd: (details) {
-        if (details.wasAccepted) return;
-      },
       child: child,
     );
   }
