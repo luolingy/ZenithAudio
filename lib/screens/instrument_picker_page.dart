@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
 import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/instrument.dart';
 import '../services/synth_service.dart';
+import '../services/instrument_pack_service.dart';
 
 /// Full-screen instrument picker with card grid and preview/audition.
 class InstrumentPickerPage extends StatefulWidget {
@@ -25,11 +27,56 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
   bool _previewDisposed = false;
   final _synth = SynthService();
   final Map<String, Uint8List> _previewCache = {};
+  bool _gmLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _selectedId = widget.currentId;
+    _loadGmPresets();
+  }
+
+  Future<void> _loadGmPresets() async {
+    try {
+      final gm = await InstrumentPackService.loadFromAsset('assets/instruments/gm_presets.json');
+      InstrumentPreset.addUserPresets(gm);
+    } catch (_) {}
+    if (mounted) setState(() => _gmLoaded = true);
+  }
+
+  Future<void> _importFromZip() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['zip'],
+    );
+    if (result == null || result.files.isEmpty) return;
+    final path = result.files.first.path;
+    if (path == null) return;
+
+    try {
+      final presets = await InstrumentPackService.loadFromZip(path);
+      if (presets.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No instrument definitions found in ZIP.')),
+          );
+        }
+        return;
+      }
+      InstrumentPreset.addUserPresets(presets);
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Imported ${presets.length} instruments.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to import: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -122,8 +169,29 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
     final cs = Theme.of(context).colorScheme;
 
     final grouped = <String, List<InstrumentPreset>>{};
-    for (final preset in InstrumentPreset.presets) {
+    for (final preset in InstrumentPreset.allPresets) {
       grouped.putIfAbsent(_catLabel(preset.category), () => []).add(preset);
+    }
+
+    // Separate user-imported presets for their own section
+    final userGroup = InstrumentPreset.userPresets.isNotEmpty
+        ? {'Imported': InstrumentPreset.userPresets}
+        : <String, List<InstrumentPreset>>{};
+
+    if (!_gmLoaded) {
+      return Scaffold(
+        backgroundColor: cs.surface,
+        appBar: AppBar(
+          backgroundColor: cs.surface,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: const Text('Select Instrument'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -137,6 +205,11 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
         ),
         title: const Text('Select Instrument'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.folder_open, size: 20),
+            tooltip: 'Import SoundFont / Instrument Pack (ZIP)',
+            onPressed: _importFromZip,
+          ),
           if (_selectedId != null)
             TextButton(
               onPressed: () => Navigator.of(context).pop(_selectedId),
@@ -167,6 +240,36 @@ class _InstrumentPickerPageState extends State<InstrumentPickerPage> {
               onTap: () => setState(() => _selectedId = inst.id),
               onPreview: () => _preview(inst.id),
             )),
+          ],
+          // User-imported instruments section
+          if (userGroup.isNotEmpty) ...[
+            for (final entry in userGroup.entries) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 20, bottom: 8),
+                child: Row(
+                  children: [
+                    Text(
+                      entry.key,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: cs.primary,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(Icons.person, size: 12, color: cs.primary.withAlpha(150)),
+                  ],
+                ),
+              ),
+              ...entry.value.map((inst) => _InstrumentCard(
+                preset: inst,
+                isSelected: inst.id == _selectedId,
+                isPreviewing: _previewingId == inst.id,
+                onTap: () => setState(() => _selectedId = inst.id),
+                onPreview: () => _preview(inst.id),
+              )),
+            ],
           ],
         ],
       ),

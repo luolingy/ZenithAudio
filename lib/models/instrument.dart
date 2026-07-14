@@ -38,6 +38,32 @@ class InstrumentPreset {
     this.brightnessFactor = 0.3,
   });
 
+  static final List<InstrumentPreset> _userPresets = [];
+
+  static void addUserPresets(List<InstrumentPreset> presets) {
+    for (final p in presets) {
+      // Replace existing by id
+      final idx = _userPresets.indexWhere((e) => e.id == p.id);
+      if (idx >= 0) {
+        _userPresets[idx] = p;
+      } else {
+        _userPresets.add(p);
+      }
+    }
+  }
+
+  static List<InstrumentPreset> get userPresets => List.unmodifiable(_userPresets);
+
+  static List<InstrumentPreset> get allPresets => [...presets, ..._userPresets];
+
+  static InstrumentPreset? fromIdOrNull(String id) {
+    try {
+      return allPresets.firstWhere((p) => p.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static const List<InstrumentPreset> presets = [
     // ── Keyboards ──
     InstrumentPreset(
@@ -216,7 +242,7 @@ class InstrumentPreset {
   ];
 
   static InstrumentPreset fromId(String id) =>
-      presets.firstWhere((p) => p.id == id);
+      allPresets.firstWhere((p) => p.id == id);
 
   double synthSample(double t, double freq, int velocity) {
     // Velocity → brightness: add extra harmonic drive at high velocity

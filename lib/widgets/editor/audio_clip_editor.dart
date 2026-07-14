@@ -19,6 +19,7 @@ import '../../services/audio_processing_service.dart';
 import '../../core/utils/logger.dart';
 import 'waveform_painter.dart';
 import 'generator_panel.dart';
+import 'waveform_cards.dart';
 import 'frequency_split_dialog.dart';
 
 /// Open the audio clip editor for a given track.
@@ -143,6 +144,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
             ? WaveformGenParams(type: widget.initialGenType!, frequency: 440)
             : null,
       );
+      _loadError = null;
       _safeSetState(() => _loading = false);
       return;
     }
@@ -173,6 +175,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
       }
       if (samples != null) {
         _clip = AudioClip(samples: samples, sampleRate: widget.initialSampleRate ?? 44100, sourceFile: sourceFile);
+        _loadError = null;
       } else {
         _loadError = '无法读取音频文件（格式不支持或文件损坏）。请使用 WAV 格式。';
       }
@@ -421,7 +424,14 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
             if (_clip != null)
               Column(
                 children: [
-                  Expanded(child: _buildWaveformArea(cs)),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: _buildWaveformArea(cs)),
+                        _buildWaveformCards(cs),
+                      ],
+                    ),
+                  ),
                   _buildTransportBar(cs),
                 ],
               )
@@ -452,6 +462,7 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
                     _safeSetState(() {
                       _clip = AudioClip(samples: samples, sampleRate: 44100,
                           genParams: WaveformGenParams(type: type, frequency: 440));
+                      _loadError = null;
                       _showGenerator = false;
                     });
                   },
@@ -532,45 +543,83 @@ class _AudioClipEditorState extends ConsumerState<AudioClipEditor> {
 
   Widget _buildWaveformArea(ColorScheme cs) {
     if (_clip == null) return const SizedBox();
-    return Listener(
-      onPointerSignal: (event) {
-        if (event is PointerScrollEvent) {
-          final ctrl = HardwareKeyboard.instance.logicalKeysPressed.any(
-            (k) => k == LogicalKeyboardKey.controlLeft || k == LogicalKeyboardKey.controlRight,
-          );
-          if (ctrl) {
-            _safeSetState(() {
-              _zoom = (_zoom * (event.scrollDelta.dy < 0 ? 1.15 : 0.85)).clamp(0.5, 10.0);
-            });
-          }
-        }
-      },
-      child: GestureDetector(
-        onTapUp: _onWaveformTap,
-        onPanStart: _onWaveformPanStart,
-        onPanUpdate: _onWaveformPanUpdate,
-        onPanEnd: _onWaveformPanEnd,
-        child: SingleChildScrollView(
-          controller: _hScrollCtrl,
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: _clip!.duration * _pps,
-            child: CustomPaint(
-              size: Size(_clip!.duration * _pps, 300),
-              painter: WaveformPainter(
-                samples: _clip!.samples,
-                sampleRate: _clip!.sampleRate,
-                pps: _pps,
-                playheadSec: _isPlaying ? _playheadSec : -1,
-                selection: _clip!.selection,
-                waveformColor: _track?.color ?? cs.primary,
-                scrollOffset: _hScrollCtrl.hasClients ? _hScrollCtrl.offset : 0,
+    return DragTarget<Float64List>(
+      onAcceptWithDetails: (details) => _onWaveformDropped(details.data),
+      builder: (context, candidateData, rejectedData) {
+        final isDragOver = candidateData.isNotEmpty;
+        return Listener(
+          onPointerSignal: (event) {
+            if (event is PointerScrollEvent) {
+              final ctrl = HardwareKeyboard.instance.logicalKeysPressed.any(
+                (k) => k == LogicalKeyboardKey.controlLeft || k == LogicalKeyboardKey.controlRight,
+              );
+              if (ctrl) {
+                _safeSetState(() {
+                  _zoom = (_zoom * (event.scrollDelta.dy < 0 ? 1.15 : 0.85)).clamp(0.5, 10.0);
+                });
+              }
+            }
+          },
+          child: Container(
+            decoration: isDragOver
+                ? BoxDecoration(
+                    border: Border.all(color: cs.primary.withAlpha(150), width: 2),
+                  )
+                : null,
+            child: GestureDetector(
+              onTapUp: _onWaveformTap,
+              onPanStart: _onWaveformPanStart,
+              onPanUpdate: _onWaveformPanUpdate,
+              onPanEnd: _onWaveformPanEnd,
+              child: SingleChildScrollView(
+                controller: _hScrollCtrl,
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: _clip!.duration * _pps,
+                  child: CustomPaint(
+                    size: Size(_clip!.duration * _pps, 300),
+                    painter: WaveformPainter(
+                      samples: _clip!.samples,
+                      sampleRate: _clip!.sampleRate,
+                      pps: _pps,
+                      playheadSec: _isPlaying ? _playheadSec : -1,
+                      selection: _clip!.selection,
+                      waveformColor: _track?.color ?? cs.primary,
+                      scrollOffset: _hScrollCtrl.hasClients ? _hScrollCtrl.offset : 0,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
+  }
+
+  void _onWaveformDropped(Float64List samples) {
+    if (_clip == null) return;
+    final insertSample = (_playheadSec * _clip!.sampleRate).round().clamp(0, _clip!.samples.length);
+    final endSample = (insertSample + samples.length).clamp(0, _clip!.samples.length);
+    final mixLen = endSample - insertSample;
+    if (mixLen <= 0) return;
+
+    final newSamples = Float64List.fromList(_clip!.samples);
+    for (int i = 0; i < mixLen && i < samples.length; i++) {
+      newSamples[insertSample + i] = (newSamples[insertSample + i] + samples[i] * 0.5).clamp(-1.0, 1.0);
+    }
+    _safeSetState(() {
+      _clip = AudioClip(
+        samples: newSamples,
+        sampleRate: _clip!.sampleRate,
+        sourceFile: _clip!.sourceFile,
+        genParams: _clip!.genParams,
+      );
+    });
+  }
+
+  Widget _buildWaveformCards(ColorScheme cs) {
+    return WaveformCards(onWaveformDropped: _onWaveformDropped);
   }
 
   Widget _buildTransportBar(ColorScheme cs) {
